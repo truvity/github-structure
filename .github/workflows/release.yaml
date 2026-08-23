@@ -1,0 +1,24 @@
+# Tag-triggered release — the shared implementation (truvity/ci-workflows).
+# A library repository: the release is the git tag (Go module versioning)
+# plus a GitHub Release with the changelog.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    permissions:
+      contents: write
+      packages: write
+    uses: truvity/ci-workflows/.github/workflows/release-public.yaml@24c5e10642b91e6e4922801d2f3727658171de56 # v2.10.7

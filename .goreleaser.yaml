@@ -1,0 +1,20 @@
+# Tag-triggered release through truvity/ci-workflows release-public.yaml.
+# A library: goreleaser's job here is the GitHub Release with the
+# changelog, nothing else — `skip: true` is its documented shape for
+# library projects. The Go module is versioned by the tag itself.
+version: 2
+
+builds:
+  - skip: true
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^chore"
+      - "^ci"
+      - "^docs"
+      - "^test"
+
+release:
+  github: {}
