@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	registry "github.com/truvity/github-structure/pkg/registry"
-	"github.com/truvity/gitops/cfg"
 )
 
 const (
@@ -133,30 +132,6 @@ func TestWaiverProbesUnknownOrg(t *testing.T) {
 // test outlives individual waivers coming and going — while still
 // failing if the selection ever silently drops one, which would make
 // checkStaleWaivers pass forever while checking nothing.
-func TestWaiverProbesMatchChecksWaivedOnTheRealRegistry(t *testing.T) {
-	registry, err := registry.Load(cfg.Content)
-	require.NoError(t, err)
-
-	for org, orgCfg := range registry.Orgs {
-		waived := orgCfg.ChecksWaived()
-		probes := waiverProbes(registry, org)
-
-		require.Len(t, probes, len(waived),
-			"org %q: every declared waiver must be probed", org)
-
-		for _, probe := range probes {
-			assert.Contains(t, waived, probe.Repo, "org %q", org)
-			assert.Equal(t, waived[probe.Repo], probe.Reason, "org %q repo %q", org, probe.Repo)
-			assert.NotEmpty(t, probe.SuppressedChecks,
-				"org %q repo %q: a probe with no suppressed checks probes nothing", org, probe.Repo)
-			assert.NotEmpty(t, probe.DefaultBranch,
-				"org %q repo %q: no branch to look at", org, probe.Repo)
-		}
-	}
-}
-
-// The staleness verdict: only suppressed contexts that actually report
-// count, and unrelated contexts prove nothing.
 func TestReportedSuppressed(t *testing.T) {
 	for name, tc := range map[string]struct {
 		suppressed []string

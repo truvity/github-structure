@@ -6,7 +6,6 @@ require (
 	github.com/pulumi/pulumi-github/sdk/v6 v6.15.0
 	github.com/pulumi/pulumi/sdk/v3 v3.258.0
 	github.com/stretchr/testify v1.12.0
-	github.com/truvity/gitops v0.0.0-20260823191214-5491f17cfb20
 	go.yaml.in/yaml/v3 v3.0.5
 )
 
