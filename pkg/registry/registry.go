@@ -1057,9 +1057,8 @@ func validateAppOwnership(login, name, prefix string, app *App) error {
 		return fmt.Errorf("org %q app %q: credentials.op_item is required", login, name)
 	}
 
-	if app.Credentials.SSMPrefix != "" && !strings.HasPrefix(app.Credentials.SSMPrefix, "/secrets/") {
-		return fmt.Errorf("org %q app %q: credentials.ssm_prefix must start with /secrets/", login, name)
-	}
+	// The mirror path's SHAPE (e.g. a "/secrets/" convention) is the
+	// consuming estate's rule, asserted in its own registry tests.
 
 	if app.URL == "" {
 		return fmt.Errorf("org %q app %q: url is required — the manifest flow needs a homepage URL", login, name)
