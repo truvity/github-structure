@@ -1,0 +1,77 @@
+{
+ "manifest": {},
+ "resources": [
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-partner-trustform-team-wallet",
+   "type": "github:index/team:Team",
+   "id": "18802792",
+   "custom": true
+  },
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-partner-trustform-team-platform",
+   "type": "github:index/team:Team",
+   "id": "18802793",
+   "custom": true
+  },
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-robots",
+   "type": "github:index/team:Team",
+   "id": "14428643",
+   "custom": true
+  },
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-team-people",
+   "type": "github:index/team:Team",
+   "id": "18794411",
+   "custom": true
+  },
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-team-dms",
+   "type": "github:index/team:Team",
+   "id": "18794409",
+   "custom": true
+  },
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-team-board",
+   "type": "github:index/team:Team",
+   "id": "18794407",
+   "custom": true
+  },
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-team-eudi",
+   "type": "github:index/team:Team",
+   "id": "18794408",
+   "custom": true
+  },
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-team-legacy",
+   "type": "github:index/team:Team",
+   "id": "18825344",
+   "custom": true
+  },
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-team-it",
+   "type": "github:index/team:Team",
+   "id": "18794410",
+   "custom": true
+  },
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-team-steerco",
+   "type": "github:index/team:Team",
+   "id": "18825345",
+   "custom": true
+  },
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-team-marketing",
+   "type": "github:index/team:Team",
+   "id": "18794413",
+   "custom": true
+  },
+  {
+   "urn": "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-ci-cd",
+   "type": "github:index/team:Team",
+   "id": "7315349",
+   "custom": true
+  }
+ ]
+}
