@@ -924,10 +924,14 @@ func deployBranchRulesets(
 	for _, rs := range rulesets {
 		actors := make(github.RepositoryRulesetBypassActorArray, 0, len(rs.BypassApps)+1)
 
-		// OrganizationAdmin is actor id 1 by GitHub's convention.
+		// OrganizationAdmin: GitHub's REST API IGNORES actor_id on write
+		// for this actor type and returns 0 on read — so 0 is the only
+		// drift-free spelling. Declaring the documented "1" produced a
+		// perpetual update-in-plan (write 1, read 0, diff forever),
+		// found via refresh validation on 2026-08-24.
 		if rs.BypassOrgAdmins {
 			actors = append(actors, github.RepositoryRulesetBypassActorArgs{
-				ActorId:    pulumi.Int(1),
+				ActorId:    pulumi.Int(0),
 				ActorType:  pulumi.String("OrganizationAdmin"),
 				BypassMode: pulumi.String("always"),
 			})
