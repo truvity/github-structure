@@ -863,7 +863,18 @@ func deployTagRulesets(
 	provider *github.Provider,
 ) error {
 	for _, rs := range rulesets {
-		actors := make(github.RepositoryRulesetBypassActorArray, 0, len(rs.BypassTeams))
+		actors := make(github.RepositoryRulesetBypassActorArray, 0, len(rs.BypassTeams)+len(rs.BypassApps))
+
+		// Integration actors by DATABASE id — how a scheduled
+		// auto-release cuts its tag (the branch-ruleset shape,
+		// unchanged).
+		for _, id := range rs.BypassApps {
+			actors = append(actors, github.RepositoryRulesetBypassActorArgs{
+				ActorId:    pulumi.Int(id),
+				ActorType:  pulumi.String("Integration"),
+				BypassMode: pulumi.String("always"),
+			})
+		}
 
 		for _, slug := range rs.BypassTeams {
 			team, ok := teams[slug]
