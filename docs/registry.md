@@ -43,7 +43,8 @@ orgs:
           reason: …               # the decision that made it deliberate
           protection: {…}
         tag_rulesets:             # bypass_teams reference declared teams
-          - {name: …, pattern: refs/tags/…, bypass_teams: […]}
+          - {name: …, pattern: refs/tags/…, bypass_teams: […],
+             bypass_apps: […]}     # App DATABASE ids (auto-release bots)
         branch_rulesets: [...]
     apps:                         # inventory + drift for GitHub Apps
       <name>:
@@ -69,3 +70,30 @@ Sharp edges the schema enforces (each learned, not designed):
 - Fields GitHub owns in a given org state (e.g. `allow_forking` where
   the org forbids private forking) are excluded from writes —
   `repoIgnoredFields` in pkg/engine records each, with tests naming why.
+
+## Bypass semantics — pick the mechanism by what must stay automatic
+
+Three ways to let an actor through a gate, and they are NOT
+interchangeable (each learned on 2026-08-26):
+
+- **Classic `pull_request_bypassers`** exempts the actor's PRs from the
+  review requirement entirely — the ONLY shape **auto-merge** can ride:
+  an armed PR completes on green checks alone. A ruleset bypass never
+  does this.
+- **Ruleset bypass actors** (`bypass_apps`, `bypass_org_admins`) permit
+  a *deliberate, audit-visible act* — the "bypass rules" button, or a
+  bot pushing a tag. Right for release acts; wrong for anything that
+  must complete unattended on a PR.
+- **`enforce_admins: false`** is the blunt escape hatch: admins ignore
+  the whole classic rule set. Prefer the two above.
+
+Provider spellings that cost a failed apply each:
+
+- `pull_request_bypassers` entries are **actor refs**: `/login` for a
+  user, `org/team-slug` for a team. A bare login fails GraphQL node
+  resolution at apply time.
+- Ruleset App actors use the App's **database id** (the number in the
+  App settings URL), not the node id.
+- `OrganizationAdmin` ruleset actors must be declared with
+  `actor_id: 0` — GitHub ignores the documented `1` on write and
+  returns 0 on read, so any other spelling is a perpetual diff.

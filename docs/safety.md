@@ -114,3 +114,25 @@ that comparison, so `pkg/app` probes GitHub directly:
   is re-read from GitHub, and anything accidentally destroyed shows up
   as drift. Zero is the only acceptable answer.
 - **If an apply half-fails, do not re-run and hope** (see above).
+- **Never apply a refresh plan you have not read.** `up --refresh`
+  reconciles state to live — including hand-added things the registry
+  does not know. On 2026-08-26 an unread refresh plan would have
+  removed a hand-added App bypass from a tag ruleset and silently
+  broken a weekly auto-release. Read the diff; if it wants to remove
+  something live, the fix is usually to DECLARE it, not to apply.
+- **Interrupted runs leave a stale state lock.** Ctrl+C kills Pulumi
+  before it releases the backend lock; every later command then fails
+  with "the stack is currently locked". Recover with
+  `pulumi cancel --stack <s> --yes` — run it from the Pulumi project
+  directory, or it cannot even find its backend.
+- **Out-of-band protection edits invalidate state node IDs.** Deleting
+  and recreating a branch protection rule via the REST API gives it a
+  new GraphQL node id; the next apply fails with "Could not resolve to
+  a node…". Recover with a targeted
+  `pulumi refresh --target <protection-urn>`; if the follow-up create
+  then hits "Name already protected: <branch>", delete the live rule
+  once and let the engine recreate it as declared.
+- **Refresh passes take minutes, not seconds** — one GitHub API read
+  per resource. A silent multi-minute `--refresh` is working, not hung;
+  a frozen single connection beyond ~5 minutes is wedged and safe to
+  SIGINT (which releases the lock cleanly).

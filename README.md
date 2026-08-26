@@ -20,6 +20,12 @@ Extracted from a production estate that manages two organizations with
 it; the docs keep the incidents that shaped each rule, because the rule
 without its incident reads as pedantry.
 
+Part of a documentation triangle: this repo covers what a repository
+*is*; [ci-workflows](https://github.com/truvity/ci-workflows) covers
+what it *does* (see its `docs/estate-lifecycle.md` for the end-to-end
+path); [ci-plane](https://github.com/truvity/ci-plane) covers where CI
+*runs* and the artifact doctrine (`docs/normalization.md`).
+
 ## The three ideas
 
 **1. Profiles, and overrides that must explain themselves.** Every
