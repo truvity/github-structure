@@ -217,6 +217,37 @@ func TestProtectionDisabledIsFine(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// ── branch rulesets ────────────────────────────────────────────────────
+
+// A ruleset must carry SOME bypass — apps or org admins — or the gate
+// belongs in classic protection. bypass_org_admins alone is a valid
+// bypass (D12: the audit-visible admin escape hatch on ci-workflows).
+func TestBranchRulesetAcceptsOrgAdminOnlyBypass(t *testing.T) {
+	body := strings.Replace(minimal, "        profile: public\n", `        profile: public
+        branch_rulesets:
+          - name: pr-approval
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 1
+            bypass_org_admins: true
+`, 1)
+
+	_, err := load(t, body)
+	require.NoError(t, err)
+}
+
+func TestBranchRulesetRejectsNoBypassAtAll(t *testing.T) {
+	body := strings.Replace(minimal, "        profile: public\n", `        profile: public
+        branch_rulesets:
+          - name: pr-approval
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 1
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "a bypass is required")
+}
+
 // ── check waivers (INF-410) ────────────────────────────────────────────
 
 // The profile keeps stating the intent; the waiver drops it for one

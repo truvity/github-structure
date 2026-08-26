@@ -944,9 +944,9 @@ func validateBranchRulesets(login, name string, repo *Repo) error {
 		case rs.RequiredApprovals <= 0:
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: required_approvals must be positive —"+
 				" a ruleset enforcing nothing is noise", login, name, rs.Name)
-		case len(rs.BypassApps) == 0:
-			return fmt.Errorf("org %q repo %q: branch ruleset %q: bypass_apps is required —"+
-				" without a bypass this belongs in classic protection", login, name, rs.Name)
+		case len(rs.BypassApps) == 0 && !rs.BypassOrgAdmins:
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: a bypass is required (bypass_apps"+
+				" or bypass_org_admins) — without one this belongs in classic protection", login, name, rs.Name)
 		}
 	}
 
