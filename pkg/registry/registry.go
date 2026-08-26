@@ -401,6 +401,12 @@ type (
 		// nobody can bypass makes the tag namespace permanently
 		// unwritable, which is a bricked release path, not protection.
 		BypassTeams []string `yaml:"bypass_teams"`
+		// BypassApps are GitHub App DATABASE ids (not node ids) allowed
+		// the same tag acts as Integration actors — how a scheduled
+		// auto-release cuts its tag without a human in the release
+		// team. Additive to BypassTeams, which stays required: an App
+		// key can rotate away, a team cannot.
+		BypassApps []int `yaml:"bypass_apps,omitempty"`
 	}
 
 	// RepoSettings is both a profile (all fields set) and an override
