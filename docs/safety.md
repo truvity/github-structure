@@ -136,3 +136,11 @@ that comparison, so `pkg/app` probes GitHub directly:
   per resource. A silent multi-minute `--refresh` is working, not hung;
   a frozen single connection beyond ~5 minutes is wedged and safe to
   SIGINT (which releases the lock cleanly).
+- **A run stuck "queued" with zero jobs has two known causes — check
+  githubstatus before debugging your own YAML.** (1) An invalid
+  reusable-workflow interface, e.g. a `workflow_call` secret name with
+  hyphens (secret names are `[A-Z_][A-Z0-9_]*`): GitHub accepts the
+  dispatch and then silently never expands the callee. (2) A GitHub
+  Actions outage: on 2026-08-26 a database-primary failure left every
+  run estate-wide planned-but-unassigned for an hour, indistinguishable
+  from cause 1 except that untouched workflows queue too.
