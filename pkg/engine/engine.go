@@ -52,6 +52,7 @@ import (
 	"log/slog"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/pulumi/pulumi-github/sdk/v6/go/github"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -810,6 +811,17 @@ func deployProtection(
 		if len(p.PullRequestBypassers) > 0 {
 			bypassers := make(pulumi.StringArray, 0, len(p.PullRequestBypassers))
 			for _, b := range p.PullRequestBypassers {
+				// The provider wants actor refs, not names: "/login"
+				// for a user, "org/slug" for a team. A bare login
+				// fails GraphQL node resolution AT APPLY TIME
+				// (2026-08-26, gitops#711) — so the registry accepts
+				// bare logins and the engine qualifies them. Anything
+				// already containing "/" passes verbatim (a team ref,
+				// or an explicitly qualified user).
+				if !strings.Contains(b, "/") {
+					b = "/" + b
+				}
+
 				bypassers = append(bypassers, pulumi.String(b))
 			}
 
@@ -863,7 +875,17 @@ func deployTagRulesets(
 	provider *github.Provider,
 ) error {
 	for _, rs := range rulesets {
-		actors := make(github.RepositoryRulesetBypassActorArray, 0, len(rs.BypassTeams)+len(rs.BypassApps))
+		actors := make(github.RepositoryRulesetBypassActorArray, 0, len(rs.BypassTeams)+len(rs.BypassApps)+1)
+
+		// OrganizationAdmin: id 0 is the only drift-free spelling —
+		// see the branch-ruleset note.
+		if rs.BypassOrgAdmins {
+			actors = append(actors, github.RepositoryRulesetBypassActorArgs{
+				ActorId:    pulumi.Int(0),
+				ActorType:  pulumi.String("OrganizationAdmin"),
+				BypassMode: pulumi.String("always"),
+			})
+		}
 
 		// Integration actors by DATABASE id — how a scheduled
 		// auto-release cuts its tag (the branch-ruleset shape,

@@ -407,6 +407,12 @@ type (
 		// team. Additive to BypassTeams, which stays required: an App
 		// key can rotate away, a team cannot.
 		BypassApps []int `yaml:"bypass_apps,omitempty"`
+		// BypassOrgAdmins additionally lets org admins act on matching
+		// tags — the audit-visible break-glass, same semantics as the
+		// branch-ruleset field (OrganizationAdmin actor, id 0: GitHub
+		// ignores the documented 1 on write and returns 0 on read, so
+		// 0 is the only drift-free spelling).
+		BypassOrgAdmins bool `yaml:"bypass_org_admins,omitempty"`
 	}
 
 	// RepoSettings is both a profile (all fields set) and an override
