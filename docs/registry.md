@@ -97,3 +97,49 @@ Provider spellings that cost a failed apply each:
 - `OrganizationAdmin` ruleset actors must be declared with
   `actor_id: 0` — GitHub ignores the documented `1` on write and
   returns 0 on read, so any other spelling is a perpetual diff.
+
+## Entitlement scopes — derived, never hand-kept
+
+A `selected`-visibility org variable or secret carries a `scope`: a
+profile-wide rule plus explicit additions, resolved to the repo list at
+apply time.
+
+```yaml
+settings:
+  actions:
+    variables:
+      RENOVATE_CLIENT_ID:
+        value: "123456"
+        visibility: selected
+        scope:
+          derive_profile: public   # every non-archived public-profile repo
+          repos: [workstation]     # explicit additions beyond the rule
+    secrets:
+      RENOVATE_APP_PRIVATE_KEY:    # names + scope only — values NEVER live here
+        visibility: selected
+        scope:
+          derive_profile: public
+```
+
+Why derived: a hand-kept list is the entitlement dead zone. Workflows on
+unentitled repos "skip cleanly" — renovate silently never ran on seven
+repos (INF-580, found twice: two repos 2026-08-25, seven more
+2026-08-27) and nothing noticed, because a missing entitlement looks
+exactly like a quiet day. Under a derived rule, new repos matching the
+profile are entitled at birth by the next reconcile, and every hand
+mutation surfaces as drift.
+
+The mechanics live in `pkg/app`: `ReconcileEntitlementScopes` (idempotent
+set-semantics PUTs — GitHub's selected-repositories endpoint replaces the
+whole list, so there is no delete window and no Pulumi import problem)
+and `CheckEntitlementScopes` (symmetric-difference drift). Secrets are
+declared by NAME and scope only; their values reach GitHub outside this
+registry.
+
+Known third surface NOT yet covered: GitHub **App installation**
+repository lists. The API to read or edit another App's installation
+membership requires credentials this tooling deliberately does not hold
+(org-owner UI, or user-to-server grants beyond the CLI token) — the
+renovate App's own selected list was the third layer of the same dead
+zone. Until that grows an API story, App installs stay a checklist item
+in the estate's safety runbook.
