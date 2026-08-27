@@ -382,3 +382,39 @@ func derefStrings(p *[]string) []string {
 
 	return *p
 }
+
+// ResolveEntitlementScope renders a derived scope into the sorted repo
+// list it entitles within one org: every non-archived repo carrying
+// DeriveProfile, plus the explicit additions, deduplicated. A nil scope
+// resolves to nil — "declared selected with no scope" is CheckOrgVariables'
+// pre-INF-580 behavior (visibility checked, membership not).
+func (c *Config) ResolveEntitlementScope(login string, s *EntitlementScope) []string {
+	if s == nil {
+		return nil
+	}
+
+	org, ok := c.Orgs[login]
+	if !ok {
+		return nil
+	}
+
+	set := map[string]bool{}
+
+	if s.DeriveProfile != "" {
+		for name, repo := range org.Repos {
+			if repo.Archived {
+				continue
+			}
+
+			if repo.Profile == s.DeriveProfile {
+				set[name] = true
+			}
+		}
+	}
+
+	for _, name := range s.Repos {
+		set[name] = true
+	}
+
+	return sortedKeys(set)
+}

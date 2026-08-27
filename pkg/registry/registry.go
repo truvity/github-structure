@@ -269,6 +269,35 @@ type (
 		// caller's context, so the same public code serves both orgs
 		// without either one's estate appearing in it.
 		Variables map[string]*OrgVariable `yaml:"variables,omitempty"`
+		// Secrets are org-level Actions secrets, declared by NAME and
+		// scope only — values live in 1Password and reach GitHub by
+		// hand or by the secrets-mirror, never through this registry.
+		// Declaring them exists for the scope: a selected-visibility
+		// secret whose repository list is hand-kept is the entitlement
+		// dead zone (INF-580 — renovate silently never ran on seven
+		// repos because nothing owned the list).
+		Secrets map[string]*OrgSecret `yaml:"secrets,omitempty"`
+	}
+
+	// OrgSecret is one org-level Actions secret: name and scope, no value.
+	OrgSecret struct {
+		// Visibility is private | selected | all, defaulting to PRIVATE.
+		Visibility string `yaml:"visibility,omitempty"`
+		// Scope declares the selected-repo membership (visibility
+		// `selected` only).
+		Scope *EntitlementScope `yaml:"scope,omitempty"`
+	}
+
+	// EntitlementScope is a DERIVED selected-repo set: a profile-wide
+	// rule plus explicit additions, never a hand-kept full list. New
+	// repos matching the rule are entitled at birth by the next
+	// reconcile; hand mutations show up as drift.
+	EntitlementScope struct {
+		// DeriveProfile entitles every non-archived repo carrying this
+		// profile (e.g. "public").
+		DeriveProfile string `yaml:"derive_profile,omitempty"`
+		// Repos are explicit additions beyond the rule.
+		Repos []string `yaml:"repos,omitempty"`
 	}
 
 	// OrgVariable is one org-level Actions variable.
@@ -282,6 +311,10 @@ type (
 		// list that is NOT modeled here; the drift check reports the
 		// visibility, not the membership.
 		Visibility string `yaml:"visibility,omitempty"`
+		// Scope declares the selected-repo membership (visibility
+		// `selected` only) — derived + explicit, reconciled by
+		// idempotent PUTs and drift-checked (INF-580).
+		Scope *EntitlementScope `yaml:"scope,omitempty"`
 	}
 
 	// Team is one org team. Nesting is expressed by Parent (a team slug).
@@ -664,6 +697,38 @@ func validateProfile(name string, p *RepoSettings) error {
 	return nil
 }
 
+// validateEntitlementScope keeps a scope honest: it may only ride
+// selected visibility, its rule must name a declared profile, and its
+// explicit additions must be repos this org declares (an entitlement
+// for a repo that does not exist is a typo hiding a dead grant).
+func (c *Config) validateEntitlementScope(login string, org *Org, subject, visibility string, s *EntitlementScope) error {
+	if s == nil {
+		return nil
+	}
+
+	if visibility != "selected" {
+		return fmt.Errorf("org %q: %s: scope requires visibility selected (got %q)", login, subject, visibility)
+	}
+
+	if s.DeriveProfile != "" {
+		if _, ok := c.Profiles[s.DeriveProfile]; !ok {
+			return fmt.Errorf("org %q: %s: scope derive_profile %q names no declared profile", login, subject, s.DeriveProfile)
+		}
+	}
+
+	for _, r := range s.Repos {
+		if _, ok := org.Repos[r]; !ok {
+			return fmt.Errorf("org %q: %s: scope repo %q is not declared", login, subject, r)
+		}
+	}
+
+	if s.DeriveProfile == "" && len(s.Repos) == 0 {
+		return fmt.Errorf("org %q: %s: scope declares neither a rule nor repos", login, subject)
+	}
+
+	return nil
+}
+
 // validateOwners checks the owner whitelist is well-formed.
 //
 // Case matters more here than it looks: GitHub logins are
@@ -705,6 +770,27 @@ func (c *Config) validateOrg(login string, org *Org) error {
 
 	if p := org.Settings.DefaultRepositoryPermission; p != "none" && p != "read" && p != "write" && p != "admin" {
 		return fmt.Errorf("org %q: default_repository_permission %q must be none, read, write or admin", login, p)
+	}
+
+	if org.Settings.Actions != nil {
+		for _, name := range sortedKeys(org.Settings.Actions.Variables) {
+			if err := c.validateEntitlementScope(login, org, "variable "+name,
+				org.Settings.Actions.Variables[name].Visibility,
+				org.Settings.Actions.Variables[name].Scope); err != nil {
+				return err
+			}
+		}
+
+		for _, name := range sortedKeys(org.Settings.Actions.Secrets) {
+			s := org.Settings.Actions.Secrets[name]
+			if v := s.Visibility; v != "" && v != "private" && v != "selected" && v != "all" {
+				return fmt.Errorf("org %q: secret %s: visibility %q must be private, selected or all", login, name, v)
+			}
+
+			if err := c.validateEntitlementScope(login, org, "secret "+name, s.Visibility, s.Scope); err != nil {
+				return err
+			}
+		}
 	}
 
 	// The prefix's SHAPE (e.g. a "/secrets/" mirror convention) is the
