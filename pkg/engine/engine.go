@@ -978,6 +978,29 @@ func deployBranchRulesets(
 			})
 		}
 
+		rules := &github.RepositoryRulesetRulesArgs{
+			PullRequest: &github.RepositoryRulesetRulesPullRequestArgs{
+				RequiredApprovingReviewCount: pulumi.Int(rs.RequiredApprovals),
+			},
+		}
+
+		// Required status checks as a RULESET rule (not classic
+		// protection): a bypass_actor skips these, which classic
+		// protection cannot express — the mechanism that lets the Kargo
+		// promotion App direct-push while everyone else stays CI-gated.
+		if len(rs.RequiredChecks) > 0 {
+			checks := make(github.RepositoryRulesetRulesRequiredStatusChecksRequiredCheckArray, 0, len(rs.RequiredChecks))
+			for _, ctx := range rs.RequiredChecks {
+				checks = append(checks, github.RepositoryRulesetRulesRequiredStatusChecksRequiredCheckArgs{
+					Context: pulumi.String(ctx),
+				})
+			}
+
+			rules.RequiredStatusChecks = &github.RepositoryRulesetRulesRequiredStatusChecksArgs{
+				RequiredChecks: checks,
+			}
+		}
+
 		_, err := github.NewRepositoryRuleset(c, "ruleset-"+repoName+"-"+rs.Name, &github.RepositoryRulesetArgs{
 			Name:        pulumi.String(rs.Name),
 			Repository:  pulumi.String(repoName),
@@ -989,11 +1012,7 @@ func deployBranchRulesets(
 					Excludes: pulumi.StringArray{},
 				},
 			},
-			Rules: &github.RepositoryRulesetRulesArgs{
-				PullRequest: &github.RepositoryRulesetRulesPullRequestArgs{
-					RequiredApprovingReviewCount: pulumi.Int(rs.RequiredApprovals),
-				},
-			},
+			Rules:        rules,
 			BypassActors: actors,
 		}, pulumi.Provider(provider))
 		if err != nil {
