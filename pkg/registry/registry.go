@@ -410,6 +410,12 @@ type (
 		Pattern string `yaml:"pattern"`
 		// RequiredApprovals is the PR review count the ruleset enforces.
 		RequiredApprovals int `yaml:"required_approvals"`
+		// RequiredChecks are status-check context names the ruleset
+		// requires. Unlike classic protection's required_checks, a
+		// ruleset's bypass_actors DO skip these — the one way to let a
+		// specific App direct-push without CI (the Kargo promotion
+		// writer, gitops). Leave empty to require no checks.
+		RequiredChecks []string `yaml:"required_checks,omitempty"`
 		// BypassApps are GitHub App DATABASE ids (not node ids) allowed
 		// to bypass — how renovate automerges its green PRs.
 		BypassApps []int `yaml:"bypass_apps"`
@@ -1039,9 +1045,9 @@ func validateBranchRulesets(login, name string, repo *Repo) error {
 			return fmt.Errorf("org %q repo %q: branch_rulesets[%d]: name is required", login, name, i)
 		case rs.Pattern == "":
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: pattern is required", login, name, rs.Name)
-		case rs.RequiredApprovals <= 0:
-			return fmt.Errorf("org %q repo %q: branch ruleset %q: required_approvals must be positive —"+
-				" a ruleset enforcing nothing is noise", login, name, rs.Name)
+		case rs.RequiredApprovals <= 0 && len(rs.RequiredChecks) == 0:
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: required_approvals must be positive"+
+				" or required_checks non-empty — a ruleset enforcing nothing is noise", login, name, rs.Name)
 		case len(rs.BypassApps) == 0 && !rs.BypassOrgAdmins:
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: a bypass is required (bypass_apps"+
 				" or bypass_org_admins) — without one this belongs in classic protection", login, name, rs.Name)

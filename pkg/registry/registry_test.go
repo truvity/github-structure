@@ -235,6 +235,38 @@ func TestBranchRulesetAcceptsOrgAdminOnlyBypass(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// A checks-only ruleset (required_approvals 0) is valid when it requires
+// status checks and has a bypass — the shape that lets an App direct-push
+// past CI (Kargo promotions) while everyone else stays gated.
+func TestBranchRulesetAcceptsChecksOnlyWithBypass(t *testing.T) {
+	body := strings.Replace(minimal, "        profile: public\n", `        profile: public
+        branch_rulesets:
+          - name: master-check
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 0
+            required_checks: [check]
+            bypass_apps: [12345]
+`, 1)
+
+	_, err := load(t, body)
+	require.NoError(t, err)
+}
+
+// A ruleset that enforces neither approvals nor checks is noise.
+func TestBranchRulesetRejectsEnforcingNothing(t *testing.T) {
+	body := strings.Replace(minimal, "        profile: public\n", `        profile: public
+        branch_rulesets:
+          - name: empty
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 0
+            bypass_org_admins: true
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "enforcing nothing is noise")
+}
+
 func TestBranchRulesetRejectsNoBypassAtAll(t *testing.T) {
 	body := strings.Replace(minimal, "        profile: public\n", `        profile: public
         branch_rulesets:
