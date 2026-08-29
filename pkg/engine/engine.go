@@ -978,10 +978,19 @@ func deployBranchRulesets(
 			})
 		}
 
-		rules := &github.RepositoryRulesetRulesArgs{
-			PullRequest: &github.RepositoryRulesetRulesPullRequestArgs{
+		rules := &github.RepositoryRulesetRulesArgs{}
+
+		// The pull_request rule TYPE forces "require a PR before merging" by
+		// its mere presence — a 0-approval pull_request rule still bans
+		// direct pushes. So emit it only when approvals are actually
+		// required. A checks-only ruleset (required_approvals: 0 +
+		// required_checks non-empty) must NOT force PRs: gitops's Kargo
+		// devel promotion writes values/versions/devel.yaml by DIRECT
+		// commit, gated by `check` alone, which the Kargo App bypasses.
+		if rs.RequiredApprovals > 0 {
+			rules.PullRequest = &github.RepositoryRulesetRulesPullRequestArgs{
 				RequiredApprovingReviewCount: pulumi.Int(rs.RequiredApprovals),
-			},
+			}
 		}
 
 		// Required status checks as a RULESET rule (not classic
