@@ -8,14 +8,14 @@ import (
 
 func scopedConfig() *registry.Config {
 	return &registry.Config{
-		Profiles: map[string]*registry.RepoSettings{"public": {}, "private": {}},
+		Presets: map[string]*registry.RepoSettings{"public": {}, "private": {}},
 		Orgs: map[string]*registry.Org{
 			"acme": {
 				Repos: map[string]*registry.Repo{
-					"tool-a":   {Profile: "public"},
-					"tool-b":   {Profile: "public"},
-					"attic":    {Profile: "public", Archived: true},
-					"internal": {Profile: "private"},
+					"tool-a":   {Preset: "public"},
+					"tool-b":   {Preset: "public"},
+					"attic":    {Preset: "public", Archived: true},
+					"internal": {Preset: "private"},
 				},
 				Settings: &registry.OrgSettings{
 					Actions: &registry.OrgActions{
@@ -24,8 +24,8 @@ func scopedConfig() *registry.Config {
 								Value:      "iv1",
 								Visibility: "selected",
 								Scope: &registry.EntitlementScope{
-									DeriveProfile: "public",
-									Repos:         []string{"internal"},
+									DerivePreset: "public",
+									Repos:        []string{"internal"},
 								},
 							},
 							"UNSCOPED": {Value: "x", Visibility: "private"},
@@ -33,7 +33,7 @@ func scopedConfig() *registry.Config {
 						Secrets: map[string]*registry.OrgSecret{
 							"RENOVATE_APP_PRIVATE_KEY": {
 								Visibility: "selected",
-								Scope:      &registry.EntitlementScope{DeriveProfile: "public"},
+								Scope:      &registry.EntitlementScope{DerivePreset: "public"},
 							},
 						},
 					},

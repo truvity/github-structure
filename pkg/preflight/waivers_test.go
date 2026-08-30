@@ -16,7 +16,7 @@ const (
 	// the minimal pair that proves the selection keys on the waiver
 	// and not on the profile.
 	waiverFixture = `
-profiles:
+presets:
   public:
     visibility: public
     has_issues: true
@@ -48,8 +48,9 @@ profiles:
       require_signatures: false
       allow_force_pushes: false
       allow_deletions: false
-    teams:
-      management: pull
+access:
+  managers:
+    management: pull
 orgs:
   acme:
     app_prefix: acme-
@@ -85,10 +86,10 @@ orgs:
     apps: {}
     repos:
       widget:
-        profile: public
+        preset: public
         checks_waived: CI has not landed yet
       gadget:
-        profile: public
+        preset: public
 `
 )
 

@@ -150,7 +150,7 @@ func TestUnfillableGrantedTeamsHonoursTheFillablePolicy(t *testing.T) {
 	reg := &registry.Config{
 		// Resolution goes through the profile — a repo whose profile is
 		// unknown resolves to nothing, so the fixture declares one.
-		Profiles: map[string]*registry.RepoSettings{"standard": {}},
+		Presets: map[string]*registry.RepoSettings{"standard": {}},
 		Orgs: map[string]*registry.Org{
 			"example": {
 				Teams: map[string]*registry.Team{
@@ -160,8 +160,8 @@ func TestUnfillableGrantedTeamsHonoursTheFillablePolicy(t *testing.T) {
 				},
 				Repos: map[string]*registry.Repo{
 					"svc": {
-						Profile: "standard",
-						Teams:   map[string]string{"team-people": "push", "robots": "push"},
+						Preset: "standard",
+						Teams:  map[string]string{"team-people": "push", "robots": "push"},
 					},
 				},
 			},

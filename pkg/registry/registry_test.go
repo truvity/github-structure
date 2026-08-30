@@ -15,7 +15,7 @@ const (
 	// minimal is a valid registry used as the base for negative cases:
 	// each test mutates one thing and asserts the loader rejects it.
 	minimal = `
-profiles:
+presets:
   public:
     visibility: public
     has_issues: true
@@ -47,8 +47,9 @@ profiles:
       require_signatures: false
       allow_force_pushes: false
       allow_deletions: false
-    teams:
-      management: pull
+access:
+  managers:
+    management: pull
 orgs:
   acme:
     app_prefix: acme-
@@ -87,7 +88,8 @@ orgs:
     apps: {}
     repos:
       widget:
-        profile: public
+        preset: public
+        access: [managers]
 `
 )
 
@@ -143,11 +145,11 @@ func TestProfileRejectsBadWorkflowPermissions(t *testing.T) {
 // ── repo rows ──────────────────────────────────────────────────────────
 
 func TestRepoRejectsUnknownProfile(t *testing.T) {
-	body := strings.Replace(minimal, "        profile: public", "        profile: internal", 1)
+	body := strings.Replace(minimal, "        preset: public", "        preset: internal", 1)
 
 	_, err := load(t, body)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown profile")
+	assert.Contains(t, err.Error(), "unknown preset")
 }
 
 func TestRepoRejectsGrantToUnknownTeam(t *testing.T) {
@@ -177,6 +179,9 @@ func TestOverridesRequireAReason(t *testing.T) {
 	assert.Contains(t, err.Error(), "reason")
 }
 
+// Grants cannot ride on a settings override. This used to need its own
+// validation rule; now the schema simply has nowhere to put them, which
+// is the stronger form — a preset cannot carry a grant at all.
 func TestOverridesRejectTeams(t *testing.T) {
 	body := minimal + `        reason: testing
         overrides:
@@ -185,7 +190,7 @@ func TestOverridesRejectTeams(t *testing.T) {
 `
 	_, err := load(t, body)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "overrides.teams")
+	assert.Contains(t, err.Error(), "field teams not found")
 }
 
 // A rule that enforces nothing at all is indistinguishable from no
@@ -223,7 +228,7 @@ func TestProtectionDisabledIsFine(t *testing.T) {
 // belongs in classic protection. bypass_org_admins alone is a valid
 // bypass (D12: the audit-visible admin escape hatch on ci-workflows).
 func TestBranchRulesetAcceptsOrgAdminOnlyBypass(t *testing.T) {
-	body := strings.Replace(minimal, "        profile: public\n", `        profile: public
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
         branch_rulesets:
           - name: pr-approval
             pattern: ~DEFAULT_BRANCH
@@ -239,7 +244,7 @@ func TestBranchRulesetAcceptsOrgAdminOnlyBypass(t *testing.T) {
 // status checks and has a bypass — the shape that lets an App direct-push
 // past CI (Kargo promotions) while everyone else stays gated.
 func TestBranchRulesetAcceptsChecksOnlyWithBypass(t *testing.T) {
-	body := strings.Replace(minimal, "        profile: public\n", `        profile: public
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
         branch_rulesets:
           - name: master-check
             pattern: ~DEFAULT_BRANCH
@@ -254,7 +259,7 @@ func TestBranchRulesetAcceptsChecksOnlyWithBypass(t *testing.T) {
 
 // A ruleset that enforces neither approvals nor checks is noise.
 func TestBranchRulesetRejectsEnforcingNothing(t *testing.T) {
-	body := strings.Replace(minimal, "        profile: public\n", `        profile: public
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
         branch_rulesets:
           - name: empty
             pattern: ~DEFAULT_BRANCH
@@ -268,7 +273,7 @@ func TestBranchRulesetRejectsEnforcingNothing(t *testing.T) {
 }
 
 func TestBranchRulesetRejectsNoBypassAtAll(t *testing.T) {
-	body := strings.Replace(minimal, "        profile: public\n", `        profile: public
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
         branch_rulesets:
           - name: pr-approval
             pattern: ~DEFAULT_BRANCH
@@ -293,7 +298,7 @@ func TestChecksWaivedDropsProfileChecks(t *testing.T) {
 	got, ok := c.ResolveRepo("acme", "widget")
 	require.True(t, ok)
 
-	assert.Empty(t, got.Protection.RequiredChecks, "the waiver must clear the profile's checks")
+	assert.Empty(t, got.Protection.RequiredChecks, "the waiver must clear the preset's checks")
 	assert.True(t, got.Protection.Enabled, "protection itself stays on")
 
 	assert.Equal(t, map[string]string{"widget": "CI has not landed yet"}, c.Orgs["acme"].ChecksWaived())
@@ -425,7 +430,7 @@ func TestResolveDoesNotMutateTheProfile(t *testing.T) {
           protection:
             enabled: false
       other:
-        profile: public
+        preset: public
 `
 	c, err := load(t, body)
 	require.NoError(t, err)
@@ -437,7 +442,7 @@ func TestResolveDoesNotMutateTheProfile(t *testing.T) {
 
 	second, ok := c.ResolveRepo("acme", "other")
 	require.True(t, ok)
-	assert.True(t, second.HasIssues, "profile leaked an override from another repo")
+	assert.True(t, second.HasIssues, "preset leaked an override from another repo")
 	assert.True(t, second.Protection.Enabled, "profile's nested protection leaked an override")
 }
 
@@ -691,4 +696,71 @@ func TestOwnersRejectMalformedLogin(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not a valid GitHub login")
+}
+
+// ── access bundles ─────────────────────────────────────────────────────
+
+func TestAccessBundleResolvesIntoTeams(t *testing.T) {
+	c, err := load(t, minimal)
+	require.NoError(t, err)
+
+	got := c.Resolve(c.Orgs["acme"].Repos["widget"])
+	assert.Equal(t, map[string]string{"management": "pull"}, got.Teams,
+		"a listed bundle must contribute its grants")
+}
+
+// The repo row is the last word, so a row can upgrade what a bundle gives
+// without needing a bespoke bundle for one repository.
+func TestRepoTeamsOverrideAccessBundle(t *testing.T) {
+	body := minimal + `        teams:
+            management: push
+`
+	c, err := load(t, body)
+	require.NoError(t, err)
+
+	got := c.Resolve(c.Orgs["acme"].Repos["widget"])
+	assert.Equal(t, "push", got.Teams["management"])
+}
+
+func TestRejectsUnknownAccessBundle(t *testing.T) {
+	body := strings.Replace(minimal, "access: [managers]", "access: [nobody]", 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown access bundle")
+}
+
+func TestAccessBundleCannotGrantToUnknownTeam(t *testing.T) {
+	body := strings.Replace(minimal, "    management: pull", "    ghosts: pull", 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "which this org does not have")
+}
+
+// The regression test for why this split exists. Two repositories on the
+// SAME preset must be able to have different grants — before, a repo's
+// access rode on the settings profile it named, so making two repos share
+// a protection policy silently made them share an audience. That is how a
+// board repository ends up readable by marketing.
+func TestSamePresetCanCarryDifferentAccess(t *testing.T) {
+	body := strings.Replace(minimal, `      widget:
+        preset: public
+        access: [managers]`, `      widget:
+        preset: public
+        access: [managers]
+      secret:
+        preset: public`, 1)
+
+	c, err := load(t, body)
+	require.NoError(t, err)
+
+	open := c.Resolve(c.Orgs["acme"].Repos["widget"])
+	shut := c.Resolve(c.Orgs["acme"].Repos["secret"])
+
+	assert.Equal(t, map[string]string{"management": "pull"}, open.Teams)
+	assert.Empty(t, shut.Teams,
+		"same preset, no bundle listed: the grant must NOT be inherited")
+	assert.Equal(t, open.Visibility, shut.Visibility,
+		"and the settings must still be shared — that is the point of the preset")
 }
