@@ -1,13 +1,13 @@
 {
-  "packages": [
-    "go@latest",
-    "golangci-lint@latest",
-    "gopls@latest",
-    "goreleaser@latest",
-    "govulncheck@latest",
-    "just@latest",
-    "just-lsp@latest"
-  ],
+  "packages": {
+    "go": "1.27.0",
+    "golangci-lint": "2.13.1",
+    "gopls": "latest",
+    "goreleaser": "latest",
+    "govulncheck": "1.7.0",
+    "just": "latest",
+    "just-lsp": "latest"
+  },
   "env": {
     "CGO_ENABLED": "0"
   },
