@@ -34,7 +34,8 @@ type (
 		Actions    ResolvedActions
 		Protection ResolvedProtection
 
-		// Teams is the profile's grants merged with the repo's own. A
+		// Teams is the union of the repo's access bundles merged with its
+		// own grants. A
 		// repo grant wins over the profile's for the same team.
 		Teams map[string]string
 	}
@@ -65,19 +66,19 @@ type (
 	}
 )
 
-// Resolve layers a repo's overrides over its profile. Callers must have
-// validated the config first (Load does); an unknown profile resolves to
+// Resolve layers a repo's overrides over its preset. Callers must have
+// validated the config first (Load does); an unknown preset resolves to
 // the zero value rather than panicking.
 func (c *Config) Resolve(repo *Repo) Resolved {
-	profile, ok := c.Profiles[repo.Profile]
+	preset, ok := c.Presets[repo.Preset]
 	if !ok {
 		return Resolved{}
 	}
 
-	merged := *profile
+	merged := *preset
 	merged.overlay(repo.Overrides)
 
-	// A waiver drops the profile's required checks for this repo. The
+	// A waiver drops the preset's required checks for this repo. The
 	// profile keeps declaring them, so the intent stays visible and
 	// lifting the waiver is a one-line deletion.
 	if repo.ChecksWaived != "" && merged.Protection != nil {
@@ -102,7 +103,7 @@ func (c *Config) Resolve(repo *Repo) Resolved {
 		DefaultBranch:       derefString(merged.DefaultBranch),
 		Description:         repo.Description,
 		Archived:            repo.Archived,
-		Teams:               mergeTeams(profile.Teams, repo.Teams),
+		Teams:               c.effectiveTeams(repo),
 	}
 
 	if merged.Actions != nil {
@@ -311,6 +312,22 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+// effectiveTeams is the union of the repo's access bundles, with the
+// repo's own grants layered last so a row can always tighten or override
+// what a bundle gives. Bundle order is irrelevant: bundles are disjoint by
+// construction, and any overlap would be identical grants anyway.
+func (c *Config) effectiveTeams(repo *Repo) map[string]string {
+	out := map[string]string{}
+
+	for _, bundle := range repo.Access {
+		for team, perm := range c.Access[bundle] {
+			out[team] = perm
+		}
+	}
+
+	return mergeTeams(out, repo.Teams)
+}
+
 func mergeTeams(profile, repo map[string]string) map[string]string {
 	out := make(map[string]string, len(profile)+len(repo))
 
@@ -385,7 +402,7 @@ func derefStrings(p *[]string) []string {
 
 // ResolveEntitlementScope renders a derived scope into the sorted repo
 // list it entitles within one org: every non-archived repo carrying
-// DeriveProfile, plus the explicit additions, deduplicated. A nil scope
+// DerivePreset, plus the explicit additions, deduplicated. A nil scope
 // resolves to nil — "declared selected with no scope" is CheckOrgVariables'
 // pre-INF-580 behavior (visibility checked, membership not).
 func (c *Config) ResolveEntitlementScope(login string, s *EntitlementScope) []string {
@@ -400,13 +417,13 @@ func (c *Config) ResolveEntitlementScope(login string, s *EntitlementScope) []st
 
 	set := map[string]bool{}
 
-	if s.DeriveProfile != "" {
+	if s.DerivePreset != "" {
 		for name, repo := range org.Repos {
 			if repo.Archived {
 				continue
 			}
 
-			if repo.Profile == s.DeriveProfile {
+			if repo.Preset == s.DerivePreset {
 				set[name] = true
 			}
 		}

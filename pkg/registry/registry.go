@@ -143,9 +143,19 @@ var (
 type (
 	// Config is the whole registry.
 	Config struct {
-		// Profiles are the shared repo settings vocabulary. Every repo row
-		// names exactly one; per-repo overrides layer on top.
-		Profiles map[string]*RepoSettings `yaml:"profiles"`
+		// Presets are the shared repo SETTINGS vocabulary — how a repo
+		// behaves and how its branches are protected. Every repo row names
+		// exactly one; per-repo overrides layer on top. Presets carry no
+		// team grants: see Access.
+		Presets map[string]*RepoSettings `yaml:"presets"`
+		// Access is the shared GRANTS vocabulary, deliberately a separate
+		// axis from Presets. Bundling the two meant a repo inherited its
+		// grants from whichever settings profile it named, so changing a
+		// repo's protection policy silently changed who could read it —
+		// collapsing two profiles that differed only in protection would
+		// have handed marketing and a product team access to the board's
+		// repository. Split, that class of mistake is unavailable.
+		Access map[string]map[string]string `yaml:"access"`
 		// Orgs maps a GitHub org login to its desired structure.
 		Orgs map[string]*Org `yaml:"orgs"`
 	}
@@ -293,9 +303,9 @@ type (
 	// repos matching the rule are entitled at birth by the next
 	// reconcile; hand mutations show up as drift.
 	EntitlementScope struct {
-		// DeriveProfile entitles every non-archived repo carrying this
+		// DerivePreset entitles every non-archived repo carrying this
 		// profile (e.g. "public").
-		DeriveProfile string `yaml:"derive_profile,omitempty"`
+		DerivePreset string `yaml:"derive_preset,omitempty"`
 		// Repos are explicit additions beyond the rule.
 		Repos []string `yaml:"repos,omitempty"`
 	}
@@ -329,13 +339,21 @@ type (
 	// Repo is one repository row: a profile reference plus the deviations
 	// that survived the keep-or-fix review.
 	Repo struct {
-		// Profile names a key in Config.Profiles.
-		Profile string `yaml:"profile"`
+		// Preset names a key in Config.Presets.
+		Preset string `yaml:"preset"`
+		// Access names keys in Config.Access. Effective grants are the
+		// union of these bundles, with the repo's own Teams winning on
+		// conflict. A repo that should not have a grant simply does not
+		// list the bundle — removal is expressible, which it was not when
+		// grants rode on the settings profile.
+		Access []string `yaml:"access,omitempty"`
 		// Description is the repo blurb; empty means unmanaged.
 		Description string `yaml:"description,omitempty"`
-		// Teams are grants ADDED to the profile's team map (or upgrades
-		// of a profile grant). Removing a profile grant is not expressible
-		// on purpose — that is a profile change, not a repo exception.
+		// Teams are grants ADDED to this repo's access bundles, or upgrades
+		// of one. Removal is expressed by not listing the bundle, which is
+		// the whole point of splitting access from presets: it used to be
+		// inexpressible, and that forced sensitive repositories onto
+		// bespoke profiles whose real purpose was the grant list.
 		Teams map[string]string `yaml:"teams,omitempty"`
 		// TagRulesets are repository rulesets targeting tags: each
 		// restricts creation, update and deletion of refs matching its
@@ -474,10 +492,6 @@ type (
 
 		Actions    *ActionsSettings    `yaml:"actions,omitempty"`
 		Protection *ProtectionSettings `yaml:"protection,omitempty"`
-
-		// Teams is the profile's baseline team grant map. On an override
-		// it is ignored — repo-level grants live in Repo.Teams.
-		Teams map[string]string `yaml:"teams,omitempty"`
 	}
 
 	// ActionsSettings is the repo's GitHub Actions policy.
@@ -638,12 +652,20 @@ func Load(fsys fs.FS) (*Config, error) {
 
 // Validate enforces every registry invariant.
 func (c *Config) Validate() error {
-	if len(c.Profiles) == 0 {
+	if len(c.Presets) == 0 {
 		return fmt.Errorf("at least one settings profile is required")
 	}
 
-	for _, name := range sortedKeys(c.Profiles) {
-		if err := validateProfile(name, c.Profiles[name]); err != nil {
+	for _, bundle := range sortedKeys(c.Access) {
+		for team, perm := range c.Access[bundle] {
+			if !validPermissions[perm] {
+				return fmt.Errorf("access bundle %q: team %q permission %q invalid", bundle, team, perm)
+			}
+		}
+	}
+
+	for _, name := range sortedKeys(c.Presets) {
+		if err := validatePreset(name, c.Presets[name]); err != nil {
 			return err
 		}
 	}
@@ -663,41 +685,35 @@ func (c *Config) Validate() error {
 
 // validateProfile requires a profile to be COMPLETE: every field set, so
 // a repo row can never resolve to a half-specified resource.
-func validateProfile(name string, p *RepoSettings) error {
+func validatePreset(name string, p *RepoSettings) error {
 	if !slugPattern.MatchString(name) {
-		return fmt.Errorf("profile %q: invalid name", name)
+		return fmt.Errorf("preset %q: invalid name", name)
 	}
 
 	if p == nil {
-		return fmt.Errorf("profile %q: empty", name)
+		return fmt.Errorf("preset %q: empty", name)
 	}
 
 	missing := p.missingFields()
 	if len(missing) > 0 {
-		return fmt.Errorf("profile %q: incomplete, missing %s (profiles must set every field; partial specs belong in a repo's overrides)",
+		return fmt.Errorf("preset %q: incomplete, missing %s (profiles must set every field; partial specs belong in a repo's overrides)",
 			name, strings.Join(missing, ", "))
 	}
 
 	if !validVisibility[*p.Visibility] {
-		return fmt.Errorf("profile %q: visibility %q must be public or private", name, *p.Visibility)
+		return fmt.Errorf("preset %q: visibility %q must be public or private", name, *p.Visibility)
 	}
 
 	if !validAllowedActions[*p.Actions.AllowedActions] {
-		return fmt.Errorf("profile %q: actions.allowed_actions %q invalid", name, *p.Actions.AllowedActions)
+		return fmt.Errorf("preset %q: actions.allowed_actions %q invalid", name, *p.Actions.AllowedActions)
 	}
 
 	if !validWorkflowPermissions[*p.Actions.DefaultWorkflowPermissions] {
-		return fmt.Errorf("profile %q: actions.default_workflow_permissions %q must be read or write", name, *p.Actions.DefaultWorkflowPermissions)
+		return fmt.Errorf("preset %q: actions.default_workflow_permissions %q must be read or write", name, *p.Actions.DefaultWorkflowPermissions)
 	}
 
 	if n := *p.Protection.RequiredApprovals; n < 0 || n > 6 {
-		return fmt.Errorf("profile %q: protection.required_approvals %d out of range 0..6", name, n)
-	}
-
-	for team, perm := range p.Teams {
-		if !validPermissions[perm] {
-			return fmt.Errorf("profile %q: team %q permission %q invalid", name, team, perm)
-		}
+		return fmt.Errorf("preset %q: protection.required_approvals %d out of range 0..6", name, n)
 	}
 
 	return nil
@@ -716,9 +732,9 @@ func (c *Config) validateEntitlementScope(login string, org *Org, subject, visib
 		return fmt.Errorf("org %q: %s: scope requires visibility selected (got %q)", login, subject, visibility)
 	}
 
-	if s.DeriveProfile != "" {
-		if _, ok := c.Profiles[s.DeriveProfile]; !ok {
-			return fmt.Errorf("org %q: %s: scope derive_profile %q names no declared profile", login, subject, s.DeriveProfile)
+	if s.DerivePreset != "" {
+		if _, ok := c.Presets[s.DerivePreset]; !ok {
+			return fmt.Errorf("org %q: %s: scope derive_preset %q names no declared preset", login, subject, s.DerivePreset)
 		}
 	}
 
@@ -728,7 +744,7 @@ func (c *Config) validateEntitlementScope(login string, org *Org, subject, visib
 		}
 	}
 
-	if s.DeriveProfile == "" && len(s.Repos) == 0 {
+	if s.DerivePreset == "" && len(s.Repos) == 0 {
 		return fmt.Errorf("org %q: %s: scope declares neither a rule nor repos", login, subject)
 	}
 
@@ -905,16 +921,12 @@ func (c *Config) validateRepos(login string, org *Org) error {
 			return fmt.Errorf("org %q repo %q: empty row", login, name)
 		}
 
-		if _, ok := c.Profiles[repo.Profile]; !ok {
-			return fmt.Errorf("org %q repo %q: unknown profile %q", login, name, repo.Profile)
+		if _, ok := c.Presets[repo.Preset]; !ok {
+			return fmt.Errorf("org %q repo %q: unknown preset %q", login, name, repo.Preset)
 		}
 
 		if repo.Overrides != nil && repo.Reason == "" {
 			return fmt.Errorf("org %q repo %q: overrides require a reason (which keep-or-fix decision made this deviation deliberate)", login, name)
-		}
-
-		if repo.Overrides != nil && len(repo.Overrides.Teams) > 0 {
-			return fmt.Errorf("org %q repo %q: overrides.teams is not a thing — repo-level grants go in the repo's own teams map", login, name)
 		}
 
 		for team, perm := range repo.Teams {
@@ -927,19 +939,32 @@ func (c *Config) validateRepos(login string, org *Org) error {
 			}
 		}
 
-		// Profile team grants must also reference teams that exist.
-		for team := range c.Profiles[repo.Profile].Teams {
-			if _, ok := org.Teams[team]; !ok {
-				return fmt.Errorf("org %q repo %q: profile %q grants to team %q, which this org does not have",
-					login, name, repo.Profile, team)
+		// Access bundles must exist, and must grant only to teams the org
+		// actually has.
+		for _, bundle := range repo.Access {
+			grants, ok := c.Access[bundle]
+			if !ok {
+				return fmt.Errorf("org %q repo %q: unknown access bundle %q", login, name, bundle)
+			}
+
+			for team, perm := range grants {
+				if _, ok := org.Teams[team]; !ok {
+					return fmt.Errorf("org %q repo %q: access bundle %q grants to team %q, which this org does not have",
+						login, name, bundle, team)
+				}
+
+				if !validPermissions[perm] {
+					return fmt.Errorf("org %q repo %q: access bundle %q gives team %q invalid permission %q",
+						login, name, bundle, team, perm)
+				}
 			}
 		}
 
 		if repo.ChecksWaived != "" {
-			profileChecks := c.Profiles[repo.Profile].Protection
+			profileChecks := c.Presets[repo.Preset].Protection
 			if profileChecks == nil || profileChecks.RequiredChecks == nil || len(*profileChecks.RequiredChecks) == 0 {
-				return fmt.Errorf("org %q repo %q: checks_waived, but profile %q requires no checks — the waiver has outlived its cause and should be deleted",
-					login, name, repo.Profile)
+				return fmt.Errorf("org %q repo %q: checks_waived, but preset %q requires no checks — the waiver has outlived its cause and should be deleted",
+					login, name, repo.Preset)
 			}
 		}
 
