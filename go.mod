@@ -2,6 +2,8 @@ module github.com/truvity/github-structure
 
 go 1.27.0
 
+toolchain go1.27.1
+
 require (
 	github.com/pulumi/pulumi-github/sdk/v6 v6.15.0
 	github.com/pulumi/pulumi/sdk/v3 v3.258.0
