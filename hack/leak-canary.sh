@@ -13,10 +13,18 @@
 # particular. Never add an exception without one.
 set -uo pipefail
 
+# The 12-digit patterns are anchored on word boundaries. Without them,
+# `[0-9]{12}` also matches a 12-digit run that happens to fall inside a
+# longer hex string -- and a nixpkgs commit SHA is exactly that. The
+# devbox bump to 17de0b976395537756f30a3e78f2f06e5cec89ed contains
+# `976395537756`, which failed this canary simultaneously in every repo
+# that carries it, for a value that is neither a particular nor secret.
+# `\b` keeps every real shape (bare, in an ARN, as an ECR host: each is
+# bounded by a non-word character) and drops the hex-embedded ones.
 patterns=(
-  '[0-9]{12}'                          # AWS account id
+  '\b[0-9]{12}\b'                          # AWS account id
   'arn:aws'                            # any ARN
-  '[0-9]{12}\.dkr\.ecr\.'              # ECR registry host
+  '\b[0-9]{12}\.dkr\.ecr\.'              # ECR registry host
   '\.svc\.cluster\.local'              # in-cluster DNS
   '/secrets/[a-z0-9-]+/'               # SSM parameter paths (/secrets/<system>/<name>; a bare
                                        # /secrets/<key> mount path is the chart's own mechanism)
