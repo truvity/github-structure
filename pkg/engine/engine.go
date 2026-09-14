@@ -636,13 +636,33 @@ func repoIgnoredFields(r registry.Resolved) []string {
 	return out
 }
 
-func deployRepo(
-	c *pulumi.Context,
-	name string,
-	r registry.Resolved,
-	live *liveState,
-	provider *github.Provider,
-) (*github.Repository, error) {
+// repoArgs builds a repository's inputs from its resolved profile.
+//
+// Extracted from deployRepo to be testable, for the same reason
+// repoIgnoredFields was: the rule below is invisible in review and only
+// shows up when the engine CREATES a repository.
+//
+// allowForking is OMITTED for a private repository, not merely ignored.
+// IgnoreChanges (repoIgnoredFields) suppresses a planned UPDATE, which is
+// what workstation needed once it existed — but it does not touch the inputs
+// of a CREATE. The provider creates with POST and then PATCHes the remaining
+// arguments, so a declared allowForking still travels on that PATCH, and
+// GitHub still answers
+//
+//	422 This organization does not allow private repository forking
+//
+// The create then errors after the POST has already succeeded, leaving the
+// repository on GitHub and absent from state — the same wedge
+// repoIgnoredFields describes, one step earlier in the lifecycle. Reproduced
+// creating truvity/keycloak on 2026-09-14, four weeks after workstation,
+// because ignoring the diff had been mistaken for not writing the field.
+//
+// Omitting is safe in both directions: the org forbids forking private
+// repositories, so `false` is the only value GitHub will hold, and nothing
+// we send could change it. Public repos keep the field — they are always
+// forkable, GitHub does not allow turning that off, and the write is
+// accepted.
+func repoArgs(name string, r registry.Resolved) *github.RepositoryArgs {
 	args := &github.RepositoryArgs{
 		Name:       pulumi.String(name),
 		Visibility: pulumi.String(r.Visibility),
@@ -657,14 +677,29 @@ func deployRepo(
 		AllowRebaseMerge:    pulumi.Bool(r.AllowRebaseMerge),
 		AllowUpdateBranch:   pulumi.Bool(r.AllowUpdateBranch),
 		DeleteBranchOnMerge: pulumi.Bool(r.DeleteBranchOnMerge),
-		AllowForking:        pulumi.Bool(r.AllowForking),
 
 		Archived: pulumi.Bool(r.Archived),
+	}
+
+	if r.Visibility != registry.VisibilityPrivate {
+		args.AllowForking = pulumi.Bool(r.AllowForking)
 	}
 
 	if r.Description != "" {
 		args.Description = pulumi.String(r.Description)
 	}
+
+	return args
+}
+
+func deployRepo(
+	c *pulumi.Context,
+	name string,
+	r registry.Resolved,
+	live *liveState,
+	provider *github.Provider,
+) (*github.Repository, error) {
+	args := repoArgs(name, r)
 
 	ignore := repoIgnoredFields(r)
 
