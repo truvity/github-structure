@@ -103,3 +103,44 @@ func TestRepoIgnoredFieldsHasNoDuplicates(t *testing.T) {
 		assert.Equal(t, 1, n, "field %q appears %d times", field, n)
 	}
 }
+
+// repoIgnoredFields above is only half the allowForking rule, and the half
+// that does not apply to a create. IgnoreChanges shapes a DIFF; these tests
+// pin the INPUTS, which is where the 2026-09-14 truvity/keycloak failure
+// actually lived: allowForking was ignored on update and still declared on
+// create, so the provider's post-POST PATCH carried it and 422'd with the
+// repository already made.
+func TestRepoArgsOmitsAllowForkingWhenPrivate(t *testing.T) {
+	t.Parallel()
+
+	args := repoArgs("keycloak", registry.Resolved{
+		Visibility:   registry.VisibilityPrivate,
+		AllowForking: false,
+	})
+
+	// Nil, not false. A declared false is still a written field, and GitHub
+	// rejects the field itself on a private repository rather than
+	// comparing the value.
+	assert.Nil(t, args.AllowForking,
+		"private repositories must not declare allowForking at all")
+
+	// The rest of the profile stays managed — omitting one field GitHub
+	// refuses must not turn into omitting the repository's settings.
+	assert.NotNil(t, args.Visibility)
+	assert.NotNil(t, args.AllowAutoMerge)
+	assert.NotNil(t, args.DeleteBranchOnMerge)
+}
+
+func TestRepoArgsKeepsAllowForkingWhenPublic(t *testing.T) {
+	t.Parallel()
+
+	args := repoArgs("bar", registry.Resolved{
+		Visibility:   "public",
+		AllowForking: true,
+	})
+
+	// Public repos are always forkable and GitHub accepts the write, so the
+	// field stays declared and its drift stays visible.
+	assert.NotNil(t, args.AllowForking,
+		"public repositories keep allowForking managed")
+}
