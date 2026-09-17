@@ -244,6 +244,12 @@ func ghSaysNotFound(stderr string) bool {
 	return strings.Contains(stderr, "HTTP 404")
 }
 
+// ghSaysNoCommit reports whether gh's stderr means "that ref has no
+// commit" — an empty repository, which answers 422 rather than 404.
+func ghSaysNoCommit(stderr string) bool {
+	return strings.Contains(stderr, "No commit found for SHA")
+}
+
 // ghAPI shells out to the gh CLI so the checker runs with whatever
 // credentials the operator (or CI) already has, rather than growing its
 // own auth path.
@@ -266,6 +272,10 @@ func ghAPI(ctx context.Context, path string, dst any) error {
 		// gh-CLI path is the one preflight uses.
 		if ghSaysNotFound(msg) {
 			return fmt.Errorf("gh api %s: %w: %s", path, ErrNotFound, msg)
+		}
+
+		if ghSaysNoCommit(msg) {
+			return fmt.Errorf("gh api %s: %w: %s", path, ErrNoCommit, msg)
 		}
 
 		return fmt.Errorf("gh api %s: %w: %s", path, err, msg)

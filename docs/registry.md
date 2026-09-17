@@ -7,6 +7,10 @@
 ```yaml
 profiles:            # shared, top-level — the whole point
   <profile-name>:    # e.g. public, private
+    review: none|required   # the default branch's REVIEW gate, for every
+                            # repo on this preset (see below). The one
+                            # optional field: omit it where the class's
+                            # gate is still hand-spelled in `protection`.
     visibility: public|private
     has_issues: …    # every settings field REQUIRED — no partial profiles
     actions: {allowed_actions: …, default_workflow_permissions: …, …}
@@ -34,6 +38,10 @@ orgs:
     repos:
       <name>:
         profile: <profile-name>
+        review: none|required     # this repo's gate, overriding its
+                                  # preset's. No reason: required — which
+                                  # repos need a reviewed merge is a fact
+                                  # about them, not a settings deviation.
         description: …            # optional; written to GitHub
         archived: true            # read-only rows: repo + nothing else
         checks_waived: >-         # free text, MUST carry its exit
@@ -70,6 +78,48 @@ Sharp edges the schema enforces (each learned, not designed):
 - Fields GitHub owns in a given org state (e.g. `allow_forking` where
   the org forbids private forking) are excluded from writes —
   `repoIgnoredFields` in pkg/engine records each, with tests naming why.
+
+## `review` — one field decides how a pull request becomes a merge
+
+| `review` | what the engine renders | how automation merges |
+| -- | -- | -- |
+| `none` | classic protection: the resolved `required_checks`, **no** approval block | GitHub's own auto-merge, on green |
+| `required` | a `pr-approval` ruleset on `~DEFAULT_BRANCH`: one approving review, organization admins bypass | an App with `pull_requests: write` approves, then auto-merge on green |
+
+One approving review counts whether it comes from a person or from a
+GitHub App: GitHub folds an App's review into `reviewDecision` the same
+way. That is why `required` needs no `bypass_apps` — automation that
+used to step OVER the gate now satisfies it, and the approval is a
+review anyone can read instead of an exemption nobody sees.
+
+`required` is a ruleset rather than classic protection for one reason:
+only a ruleset carries the organization-admin bypass. Classic protection
+either exempts admins from everything (`enforce_admins: false`) or from
+nothing.
+
+Where the checks live: classic protection, unless the repo has no
+classic rule at all (`protection.enabled: false`), in which case the
+rendered ruleset carries them. Exactly one resource enforces a context —
+two would be two rules to keep in step, and a ruleset check is
+bypassable where a classic one is not.
+
+Sharp edges, all enforced by the loader:
+
+- The field has ONE spelling per repo. `review` next to a non-zero
+  `required_approvals`, next to `pull_request_bypassers`, or next to a
+  hand-written approval ruleset is rejected — including the case where
+  the value comes from the preset and the number from an override, which
+  would otherwise drop an approval requirement silently.
+- It lives on the repository ROW, never in `overrides:`.
+- It is rejected on an archived repository: no branch, no pull requests.
+- The rendered ruleset is named `pr-approval`, which is what hand-written
+  approval rulesets were already called — so adopting the field UPDATES
+  the live ruleset instead of replacing it. A ruleset replacement has a
+  window with no gate at all.
+- A repo whose rendered rule requires a context nothing has ever
+  produced is refused by `preflight` (`checkUnreportedChecks`), with
+  `checks_waived:` as the written escape. The opposite direction —
+  a waiver whose context now reports — was already refused.
 
 ## Bypass semantics — pick the mechanism by what must stay automatic
 

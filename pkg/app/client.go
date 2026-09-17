@@ -15,6 +15,14 @@ import (
 // that is information ("this resource does not exist yet"), not failure.
 var ErrNotFound = errors.New("not found")
 
+// ErrNoCommit is returned when a ref exists in name only: an EMPTY
+// repository answers "No commit found for SHA" with 422 to anything
+// asked about its default branch. Same class of answer as ErrNotFound —
+// "there is nothing there yet" — but GitHub spells it differently, and a
+// guard that treats it as failure refuses a deploy because a repository
+// has no commits.
+var ErrNoCommit = errors.New("no commit")
+
 type (
 	// Client makes authenticated calls as a GitHub App installation. It
 	// exists so the Pulumi program can ask GitHub what already exists

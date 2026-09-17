@@ -39,6 +39,29 @@ const (
 	VisibilityPrivate = "private"
 )
 
+// Review values — the default branch's REVIEW gate, the one field that
+// decides how a pull request becomes a merge. Everything else about the
+// gate (which contexts must pass) stays in `protection`.
+const (
+	// ReviewNone asks for no approving review: the default branch is
+	// gated by its required checks alone, and an automated pull request
+	// completes on green through GitHub's own auto-merge.
+	ReviewNone = "none"
+	// ReviewRequired asks for one approving review — from a human or
+	// from an App with pull_requests: write, both of which GitHub counts
+	// towards reviewDecision. It is rendered as a RULESET rather than
+	// classic protection because only a ruleset can carry the
+	// organization-admin bypass (see BranchRuleset.BypassOrgAdmins).
+	ReviewRequired = "required"
+	// ReviewRulesetName is the display name of the ruleset `required`
+	// renders. It is the name the estate's hand-written approval
+	// rulesets already carry, on purpose: the engine keys a ruleset
+	// resource on repo + name, so adopting the field UPDATES the live
+	// ruleset instead of replacing it — and a ruleset replacement has a
+	// window with no gate at all.
+	ReviewRulesetName = "pr-approval"
+)
+
 // Team privacy values. GitHub calls a visible team "closed" and a hidden
 // one "secret"; nested teams must be closed.
 const (
@@ -89,6 +112,10 @@ var (
 
 	validPrivacy = map[string]bool{
 		PrivacyClosed: true, PrivacySecret: true,
+	}
+
+	validReview = map[string]bool{
+		ReviewNone: true, ReviewRequired: true,
 	}
 
 	validNotifications = map[string]bool{
@@ -375,6 +402,20 @@ type (
 		// Rulesets take Integration bypass actors by database ID over
 		// REST — the same machinery the tag rulesets already use.
 		BranchRulesets []*BranchRuleset `yaml:"branch_rulesets,omitempty"`
+		// Review is this repository's review gate — `none` or
+		// `required` — overriding the preset's. Empty inherits the
+		// preset, and a preset that states neither leaves the approval
+		// knobs in `protection` where they were hand-spelled: the
+		// pre-review shape, still supported for the one gate the
+		// two-value vocabulary cannot say (named human bypassers, which
+		// only classic protection can express).
+		//
+		// It sits on the ROW, not in `overrides:`, because it is not a
+		// settings deviation needing a keep-or-fix justification. Which
+		// repositories require a reviewed merge is a first-class fact
+		// about the repository; demanding a `reason:` for each would
+		// bury the one field that decides merge mechanics in prose.
+		Review string `yaml:"review,omitempty"`
 		// ChecksWaived suspends the profile's required status checks for
 		// this repo, and its value is the reason.
 		//
@@ -492,6 +533,14 @@ type (
 
 		Actions    *ActionsSettings    `yaml:"actions,omitempty"`
 		Protection *ProtectionSettings `yaml:"protection,omitempty"`
+
+		// Review is the preset's review gate (see Repo.Review), and the
+		// only optional field a preset may leave out: a class of
+		// repositories whose gate is still hand-spelled in `protection`
+		// has nothing truthful to say here, and a preset forced to
+		// guess would state a gate the engine then renders. Repos
+		// deviate on the ROW (`review:`), never in `overrides:`.
+		Review *string `yaml:"review,omitempty"`
 	}
 
 	// ActionsSettings is the repo's GitHub Actions policy.
@@ -716,6 +765,22 @@ func validatePreset(name string, p *RepoSettings) error {
 		return fmt.Errorf("preset %q: protection.required_approvals %d out of range 0..6", name, n)
 	}
 
+	if p.Review != nil {
+		if !validReview[*p.Review] {
+			return fmt.Errorf("preset %q: review %q must be %s or %s", name, *p.Review, ReviewNone, ReviewRequired)
+		}
+
+		// One spelling per gate. `review` owns the approval half of the
+		// default-branch rule; leaving a preset's classic approval
+		// block set too would make the file say two things and the
+		// engine obey one of them silently.
+		if *p.Protection.RequiredApprovals != 0 {
+			return fmt.Errorf("preset %q: review %q with protection.required_approvals %d —"+
+				" review owns the approval gate; set required_approvals to 0",
+				name, *p.Review, *p.Protection.RequiredApprovals)
+		}
+	}
+
 	return nil
 }
 
@@ -929,6 +994,18 @@ func (c *Config) validateRepos(login string, org *Org) error {
 			return fmt.Errorf("org %q repo %q: overrides require a reason (which keep-or-fix decision made this deviation deliberate)", login, name)
 		}
 
+		if repo.Review != "" && !validReview[repo.Review] {
+			return fmt.Errorf("org %q repo %q: review %q must be %s or %s", login, name, repo.Review, ReviewNone, ReviewRequired)
+		}
+
+		// `review` is a row field, never an override: an override
+		// carries a reason and merges into the settings, and a second
+		// place to say the same thing is how the two drift apart.
+		if repo.Overrides != nil && repo.Overrides.Review != nil {
+			return fmt.Errorf("org %q repo %q: review belongs on the repository row, not in overrides —"+
+				" write `review: %s` next to `preset:`", login, name, *repo.Overrides.Review)
+		}
+
 		for team, perm := range repo.Teams {
 			if _, ok := org.Teams[team]; !ok {
 				return fmt.Errorf("org %q repo %q: grant to unknown team %q", login, name, team)
@@ -992,6 +1069,11 @@ func (c *Config) validateRepos(login string, org *Org) error {
 					" protection is declared for an archived repository. Delete the waiver, or unarchive", login, name)
 			}
 
+			if repo.Review != "" {
+				return fmt.Errorf("org %q repo %q: archived, so review does nothing — an archived repository"+
+					" is read-only and takes no pull requests. Delete the field, or unarchive", login, name)
+			}
+
 			if len(repo.TagRulesets) > 0 {
 				return fmt.Errorf("org %q repo %q: archived, so tag_rulesets do nothing — an archived"+
 					" repository is read-only and takes no tag pushes to restrict. Delete them, or unarchive", login, name)
@@ -1008,7 +1090,13 @@ func (c *Config) validateRepos(login string, org *Org) error {
 		// pushes or deletions counts as enforcement — a rule can be
 		// meaningful without gating merges, which is exactly the shape a
 		// repo lands in while its checks are waived.
-		prot := c.Resolve(repo).Protection
+		resolved := c.Resolve(repo)
+
+		if err := c.validateReview(login, name, repo, resolved); err != nil {
+			return err
+		}
+
+		prot := resolved.Protection
 		if len(prot.PullRequestBypassers) > 0 && prot.RequiredApprovals == 0 {
 			return fmt.Errorf("org %q repo %q: pull_request_bypassers with required_approvals 0 —"+
 				" there is no review requirement to bypass; delete the bypassers or require approvals", login, name)
@@ -1020,6 +1108,82 @@ func (c *Config) validateRepos(login string, org *Org) error {
 	}
 
 	return nil
+}
+
+// validateReview keeps the review gate to ONE spelling per repository.
+//
+// The field exists so a reader can answer "how does a pull request
+// become a merge here?" from one line. That only holds while the older
+// spellings — a classic approval block, a hand-written approval ruleset
+// — cannot sit next to it saying something else.
+func (c *Config) validateReview(login, name string, repo *Repo, resolved Resolved) error {
+	if resolved.Review == "" {
+		return nil
+	}
+
+	// Resolve has already zeroed the classic approval block for a
+	// reviewed repo, so the DECLARED value is what has to be judged:
+	// otherwise a row that says `review: none` on a preset requiring an
+	// approval would quietly drop that approval and read as intended.
+	if approvals, bypassers := c.declaredApprovals(repo); resolved.Protection.Enabled {
+		if approvals != 0 {
+			return fmt.Errorf("org %q repo %q: review %q with protection.required_approvals %d —"+
+				" review owns the approval gate; set required_approvals to 0", login, name,
+				resolved.Review, approvals)
+		}
+
+		if len(bypassers) > 0 {
+			return fmt.Errorf("org %q repo %q: review %q with protection.pull_request_bypassers %v —"+
+				" review owns the approval gate, and it has no bypass list; delete them", login, name,
+				resolved.Review, bypassers)
+		}
+	}
+
+	for _, rs := range repo.BranchRulesets {
+		if rs == nil {
+			continue
+		}
+
+		if rs.RequiredApprovals > 0 {
+			return fmt.Errorf("org %q repo %q: review %q and branch ruleset %q both require approvals —"+
+				" delete the ruleset row; `review: %s` renders it", login, name,
+				resolved.Review, rs.Name, ReviewRequired)
+		}
+
+		if rs.Name == ReviewRulesetName {
+			return fmt.Errorf("org %q repo %q: branch ruleset %q collides with the one `review` renders —"+
+				" rename it, or drop it and let review own the gate", login, name, rs.Name)
+		}
+	}
+
+	return nil
+}
+
+// declaredApprovals is the classic approval block a repo row DECLARES —
+// its preset's, with its own override on top — before Resolve answers
+// for it on behalf of `review`.
+func (c *Config) declaredApprovals(repo *Repo) (int, []string) {
+	var (
+		approvals int
+		bypassers []string
+	)
+
+	if preset := c.Presets[repo.Preset]; preset != nil && preset.Protection != nil {
+		approvals = derefInt(preset.Protection.RequiredApprovals)
+		bypassers = derefStrings(preset.Protection.PullRequestBypassers)
+	}
+
+	if repo.Overrides != nil && repo.Overrides.Protection != nil {
+		if p := repo.Overrides.Protection.RequiredApprovals; p != nil {
+			approvals = *p
+		}
+
+		if p := repo.Overrides.Protection.PullRequestBypassers; p != nil {
+			bypassers = *p
+		}
+	}
+
+	return approvals, bypassers
 }
 
 // validateTagRulesets checks one repo's tag_rulesets rows: named,
