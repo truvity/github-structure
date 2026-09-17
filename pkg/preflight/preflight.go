@@ -192,6 +192,17 @@ func Run(ctx context.Context, o Opts) error {
 
 	problems = append(problems, waiverProblems...)
 
+	// The other direction of the same rule: a repo requiring a context
+	// nothing produces is a merge gate nobody can pass, and it must be
+	// admitted in writing (checks_waived) rather than discovered by the
+	// first person with a pull request.
+	checkProblems, err := checkUnreportedChecks(ctx, reg, org)
+	if err != nil {
+		return err
+	}
+
+	problems = append(problems, checkProblems...)
+
 	// Engine events carry the per-resource op; the summary alone would say
 	// "13 to replace" without naming what, which is not enough to decide
 	// whether a replacement is the legitimate kind.

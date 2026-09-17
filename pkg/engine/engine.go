@@ -66,6 +66,10 @@ const (
 	// A constant because repoIgnoredFields and its tests both name it, and
 	// a typo in either would silently stop ignoring it.
 	fieldAutoInit = "autoInit"
+	// defaultBranchRef is GitHub's ref-name shorthand for "whatever the
+	// default branch is" — what a rendered review gate targets, so a
+	// repository that renames master does not lose its gate.
+	defaultBranchRef = "~DEFAULT_BRANCH"
 )
 
 // Deploy provisions one organization's structure. The stack name IS the
@@ -536,6 +540,10 @@ func deployRepos(
 
 			if err := deployBranchRulesets(c, name, orgCfg.Repos[name].BranchRulesets, provider); err != nil {
 				return fmt.Errorf("repo %s branch rulesets: %w", name, err)
+			}
+
+			if err := deployReviewGate(c, name, resolved, provider); err != nil {
+				return fmt.Errorf("repo %s review gate: %w", name, err)
 			}
 		}
 
@@ -1065,6 +1073,68 @@ func deployBranchRulesets(
 	}
 
 	return nil
+}
+
+// deployReviewGate renders the default branch's REVIEW requirement from
+// the registry's one-field answer (`review:`).
+//
+// `none` renders nothing here: the gate is the classic protection rule's
+// required checks, and Resolve has already zeroed its approval block, so
+// an automated pull request completes on green through GitHub's own
+// auto-merge.
+//
+// `required` renders ONE ruleset asking for a single approving review.
+// A ruleset rather than classic protection because only a ruleset can
+// carry the organization-admin bypass — the audit-visible break-glass
+// the estate relies on (D11: moving bar's gate into a ruleset silently
+// removed the admin exemption classic protection grants implicitly).
+// One approval, from a human OR from an App with pull_requests: write.
+// GitHub counts an App's review towards reviewDecision — measured on a
+// live pull request on 2026-09-17, with a token narrowed to that one
+// permission — which is why no App needs a bypass actor here any more:
+// automation that used to step over the gate now satisfies it, and the
+// approval is a review anyone can read rather than an exemption.
+//
+// The ruleset carries the repo's required checks only where there is no
+// classic rule to carry them (protection.enabled: false). Exactly one
+// resource enforces a context: declaring it in both places is two rules
+// to keep in step, and a ruleset check is bypassable where a classic one
+// is not.
+func deployReviewGate(
+	c *pulumi.Context,
+	name string,
+	r registry.Resolved,
+	provider *github.Provider,
+) error {
+	gate := reviewGate(r)
+	if gate == nil {
+		return nil
+	}
+
+	return deployBranchRulesets(c, name, []*registry.BranchRuleset{gate}, provider)
+}
+
+// reviewGate is the ruleset a resolved repo's review value asks for, or
+// nil where it asks for none. Split from deployReviewGate so the
+// decision is testable without a Pulumi context: what this returns is
+// the whole of the review mechanics.
+func reviewGate(r registry.Resolved) *registry.BranchRuleset {
+	if r.Review != registry.ReviewRequired {
+		return nil
+	}
+
+	gate := &registry.BranchRuleset{
+		Name:              registry.ReviewRulesetName,
+		Pattern:           defaultBranchRef,
+		RequiredApprovals: 1,
+		BypassOrgAdmins:   true,
+	}
+
+	if !r.Protection.Enabled {
+		gate.RequiredChecks = r.Protection.RequiredChecks
+	}
+
+	return gate
 }
 
 func deployTeamGrants(

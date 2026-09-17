@@ -31,6 +31,12 @@ type (
 		// ignores them rather than planning writes GitHub will reject.
 		Archived bool
 
+		// Review is the default branch's review gate: "" (the approval
+		// knobs in Protection are the gate, as they were before the
+		// field existed), ReviewNone or ReviewRequired. The repo row
+		// wins over its preset.
+		Review string
+
 		Actions    ResolvedActions
 		Protection ResolvedProtection
 
@@ -104,6 +110,7 @@ func (c *Config) Resolve(repo *Repo) Resolved {
 		Description:         repo.Description,
 		Archived:            repo.Archived,
 		Teams:               c.effectiveTeams(repo),
+		Review:              reviewOf(repo, preset),
 	}
 
 	if merged.Actions != nil {
@@ -132,7 +139,32 @@ func (c *Config) Resolve(repo *Repo) Resolved {
 		}
 	}
 
+	// The gate `review` replaces must not survive alongside it: where a
+	// review value is set, the approval half of the default-branch rule
+	// is the field's to decide and classic protection carries the checks
+	// alone. The loader rejects a registry that says both
+	// (validateReview); this keeps a hand-built Config honest too.
+	if out.Review != "" {
+		out.Protection.RequiredApprovals = 0
+		out.Protection.PullRequestBypassers = nil
+	}
+
 	return out
+}
+
+// reviewOf is the review gate a repo row resolves to: its own value, or
+// its preset's, or empty — the pre-review shape, where the approval
+// knobs in `protection` are the gate.
+func reviewOf(repo *Repo, preset *RepoSettings) string {
+	if repo.Review != "" {
+		return repo.Review
+	}
+
+	if preset != nil && preset.Review != nil {
+		return *preset.Review
+	}
+
+	return ""
 }
 
 // ResolveRepo is the by-name form of Resolve.

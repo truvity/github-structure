@@ -41,6 +41,36 @@ answers 404 to the probe. The first engine-created repository was
 blocked by its own waiver — the guard read 404 as failure instead of
 as "no commits, no checks". 404 is information.
 
+## Guard: a required context nothing produces fails the deploy
+
+The same probe, the other way round. A repository whose rendered rule
+requires a context that has never reported on its default branch is a
+merge gate no pull request can pass — and it reads as "CI has not run
+yet" rather than as a failure, so nobody goes looking. Three repositories
+sat unmergeable in exactly that way before the guard existed; the
+`checks_waived:` escape was bought by the same afternoon.
+
+So the preflight refuses a repo that requires a context nothing produces,
+and `checks_waived:` — with its exit condition in writing — is the only
+way past. ANY of the required contexts reporting clears the repo: the
+question is whether the workflow exists, not whether it passed. A repo
+that does not exist yet answers 404 and is skipped, for the reason above.
+
+*Two windows, not one.* The default branch alone is not evidence: a CI
+contract whose fan-in job runs on `pull_request` only reports nothing
+under that name on master. Four repositories were in exactly that shape,
+and a branch-only probe called every one of them broken — so the guard
+falls back to the head of the most recently updated pull request, where
+a required context is actually satisfied. A repository that has never
+had a pull request reports nothing in either window, which is the honest
+answer.
+
+*And an empty repository answers 422, not 404.* "No commit found for SHA"
+is the same class of answer — there is nothing there yet — but it is
+spelled differently, and reading it as failure refused a whole
+organization's preflight because one declared repository had never been
+pushed to. Both sentinels are skipped, in both waiver guards.
+
 ## Guard: no unfillable team left required
 
 A team whose membership source cannot fill it (no roster mapping, no
