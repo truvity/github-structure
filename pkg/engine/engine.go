@@ -534,15 +534,15 @@ func deployRepos(
 				return fmt.Errorf("repo %s protection: %w", name, err)
 			}
 
-			if err := deployTagRulesets(c, name, orgCfg.Repos[name].TagRulesets, teams, provider); err != nil {
+			if err := deployTagRulesets(c, name, orgCfg, orgCfg.Repos[name].TagRulesets, teams, provider); err != nil {
 				return fmt.Errorf("repo %s tag rulesets: %w", name, err)
 			}
 
-			if err := deployBranchRulesets(c, name, orgCfg.Repos[name].BranchRulesets, provider); err != nil {
+			if err := deployBranchRulesets(c, name, orgCfg, orgCfg.Repos[name].BranchRulesets, provider); err != nil {
 				return fmt.Errorf("repo %s branch rulesets: %w", name, err)
 			}
 
-			if err := deployReviewGate(c, name, resolved, provider); err != nil {
+			if err := deployReviewGate(c, name, orgCfg, resolved, provider); err != nil {
 				return fmt.Errorf("repo %s review gate: %w", name, err)
 			}
 		}
@@ -913,12 +913,22 @@ func deployProtection(
 func deployTagRulesets(
 	c *pulumi.Context,
 	repoName string,
+	orgCfg *registry.Org,
 	rulesets []*registry.TagRuleset,
 	teams map[string]*github.Team,
 	provider *github.Provider,
 ) error {
 	for _, rs := range rulesets {
-		actors := make(github.RepositoryRulesetBypassActorArray, 0, len(rs.BypassTeams)+len(rs.BypassApps)+1)
+		// Names in, database ids out — resolved against THIS org's App
+		// rows. Validation already refused an unresolvable name at load,
+		// so an error here means a Config built in code rather than
+		// loaded; it still fails rather than silently dropping an actor.
+		appIDs, err := orgCfg.BypassAppIDs(rs.BypassApps)
+		if err != nil {
+			return fmt.Errorf("tag ruleset %s: %w", rs.Name, err)
+		}
+
+		actors := make(github.RepositoryRulesetBypassActorArray, 0, len(rs.BypassTeams)+len(appIDs)+1)
 
 		// OrganizationAdmin: id 0 is the only drift-free spelling —
 		// see the branch-ruleset note.
@@ -933,7 +943,7 @@ func deployTagRulesets(
 		// Integration actors by DATABASE id — how a scheduled
 		// auto-release cuts its tag (the branch-ruleset shape,
 		// unchanged).
-		for _, id := range rs.BypassApps {
+		for _, id := range appIDs {
 			actors = append(actors, github.RepositoryRulesetBypassActorArgs{
 				ActorId:    pulumi.Int(id),
 				ActorType:  pulumi.String("Integration"),
@@ -958,7 +968,7 @@ func deployTagRulesets(
 			})
 		}
 
-		_, err := github.NewRepositoryRuleset(c, "ruleset-"+repoName+"-"+rs.Name, &github.RepositoryRulesetArgs{
+		_, err = github.NewRepositoryRuleset(c, "ruleset-"+repoName+"-"+rs.Name, &github.RepositoryRulesetArgs{
 			Name:        pulumi.String(rs.Name),
 			Repository:  pulumi.String(repoName),
 			Target:      pulumi.String("tag"),
@@ -994,11 +1004,20 @@ func deployTagRulesets(
 func deployBranchRulesets(
 	c *pulumi.Context,
 	repoName string,
+	orgCfg *registry.Org,
 	rulesets []*registry.BranchRuleset,
 	provider *github.Provider,
 ) error {
 	for _, rs := range rulesets {
-		actors := make(github.RepositoryRulesetBypassActorArray, 0, len(rs.BypassApps)+1)
+		// See deployTagRulesets: the registry speaks App names, the
+		// REST API speaks database ids, and an unresolvable name is an
+		// error rather than an actor that quietly goes missing.
+		appIDs, err := orgCfg.BypassAppIDs(rs.BypassApps)
+		if err != nil {
+			return fmt.Errorf("branch ruleset %s: %w", rs.Name, err)
+		}
+
+		actors := make(github.RepositoryRulesetBypassActorArray, 0, len(appIDs)+1)
 
 		// OrganizationAdmin: GitHub's REST API IGNORES actor_id on write
 		// for this actor type and returns 0 on read — so 0 is the only
@@ -1013,7 +1032,7 @@ func deployBranchRulesets(
 			})
 		}
 
-		for _, id := range rs.BypassApps {
+		for _, id := range appIDs {
 			actors = append(actors, github.RepositoryRulesetBypassActorArgs{
 				ActorId:    pulumi.Int(id),
 				ActorType:  pulumi.String("Integration"),
@@ -1053,7 +1072,7 @@ func deployBranchRulesets(
 			}
 		}
 
-		_, err := github.NewRepositoryRuleset(c, "ruleset-"+repoName+"-"+rs.Name, &github.RepositoryRulesetArgs{
+		_, err = github.NewRepositoryRuleset(c, "ruleset-"+repoName+"-"+rs.Name, &github.RepositoryRulesetArgs{
 			Name:        pulumi.String(rs.Name),
 			Repository:  pulumi.String(repoName),
 			Target:      pulumi.String("branch"),
@@ -1103,6 +1122,7 @@ func deployBranchRulesets(
 func deployReviewGate(
 	c *pulumi.Context,
 	name string,
+	orgCfg *registry.Org,
 	r registry.Resolved,
 	provider *github.Provider,
 ) error {
@@ -1111,7 +1131,7 @@ func deployReviewGate(
 		return nil
 	}
 
-	return deployBranchRulesets(c, name, []*registry.BranchRuleset{gate}, provider)
+	return deployBranchRulesets(c, name, orgCfg, []*registry.BranchRuleset{gate}, provider)
 }
 
 // reviewGate is the ruleset a resolved repo's review value asks for, or

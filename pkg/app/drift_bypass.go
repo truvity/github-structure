@@ -79,7 +79,7 @@ func CheckBypassSurfaces(ctx context.Context, org string, cfg *registry.Config) 
 
 		drifts = append(drifts, d...)
 
-		d, err = checkRulesetActors(ctx, org, name, repo, teamIDs)
+		d, err = checkRulesetActors(ctx, org, orgCfg, name, repo, teamIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -127,16 +127,37 @@ func checkReviewBypasses(ctx context.Context, org, name string, want registry.Re
 		normalizeBypassers(org, want.Protection.PullRequestBypassers), got), nil
 }
 
-func checkRulesetActors(ctx context.Context, org, name string, repo *registry.Repo, teamIDs map[string]int64) ([]Drift, error) {
+func checkRulesetActors(
+	ctx context.Context,
+	org string,
+	orgCfg *registry.Org,
+	name string,
+	repo *registry.Repo,
+	teamIDs map[string]int64,
+) ([]Drift, error) {
 	// Declared expectation per ruleset name.
 	wantActors := map[string][]string{}
 
 	for _, rs := range repo.TagRulesets {
-		wantActors[rs.Name] = declaredTagActors(ctx, org, rs, teamIDs)
+		// The registry names its bypass Apps; GitHub reports database
+		// ids. Resolve before comparing, and REFUSE on a name that does
+		// not resolve — reporting "the live App is undeclared" would
+		// invite someone to delete the actor that makes releases work.
+		appIDs, err := orgCfg.BypassAppIDs(rs.BypassApps)
+		if err != nil {
+			return nil, fmt.Errorf("repo %s tag ruleset %s: %w", name, rs.Name, err)
+		}
+
+		wantActors[rs.Name] = declaredTagActors(ctx, org, rs, appIDs, teamIDs)
 	}
 
 	for _, rs := range repo.BranchRulesets {
-		wantActors[rs.Name] = declaredBranchActors(rs)
+		appIDs, err := orgCfg.BypassAppIDs(rs.BypassApps)
+		if err != nil {
+			return nil, fmt.Errorf("repo %s branch ruleset %s: %w", name, rs.Name, err)
+		}
+
+		wantActors[rs.Name] = declaredBranchActors(rs, appIDs)
 	}
 
 	var live []liveRuleset
@@ -218,14 +239,20 @@ func normalizeBypassers(org string, declared []string) []string {
 // declaredTagActors renders a tag ruleset's expected actor set in the
 // live vocabulary (Type:id). Team ids are resolved (and cached) via the
 // API — the registry speaks slugs, GitHub speaks database ids.
-func declaredTagActors(ctx context.Context, org string, rs *registry.TagRuleset, teamIDs map[string]int64) []string {
-	actors := make([]string, 0, len(rs.BypassTeams)+len(rs.BypassApps)+1)
+func declaredTagActors(
+	ctx context.Context,
+	org string,
+	rs *registry.TagRuleset,
+	appIDs []int,
+	teamIDs map[string]int64,
+) []string {
+	actors := make([]string, 0, len(rs.BypassTeams)+len(appIDs)+1)
 
 	if rs.BypassOrgAdmins {
 		actors = append(actors, "OrganizationAdmin:0")
 	}
 
-	for _, id := range rs.BypassApps {
+	for _, id := range appIDs {
 		actors = append(actors, "Integration:"+strconv.Itoa(id))
 	}
 
@@ -249,14 +276,14 @@ func declaredTagActors(ctx context.Context, org string, rs *registry.TagRuleset,
 	return actors
 }
 
-func declaredBranchActors(rs *registry.BranchRuleset) []string {
-	actors := make([]string, 0, len(rs.BypassApps)+1)
+func declaredBranchActors(rs *registry.BranchRuleset, appIDs []int) []string {
+	actors := make([]string, 0, len(appIDs)+1)
 
 	if rs.BypassOrgAdmins {
 		actors = append(actors, "OrganizationAdmin:0")
 	}
 
-	for _, id := range rs.BypassApps {
+	for _, id := range appIDs {
 		actors = append(actors, "Integration:"+strconv.Itoa(id))
 	}
 

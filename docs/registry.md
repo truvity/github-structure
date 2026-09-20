@@ -52,7 +52,7 @@ orgs:
           protection: {…}
         tag_rulesets:             # bypass_teams reference declared teams
           - {name: …, pattern: refs/tags/…, bypass_teams: […],
-             bypass_apps: […]}     # App DATABASE ids (auto-release bots)
+             bypass_apps: […]}     # App NAMES from this org's `apps`
         branch_rulesets: [...]
     apps:                         # inventory + drift for GitHub Apps
       <name>:
@@ -134,6 +134,16 @@ interchangeable (each learned on 2026-08-26):
   a *deliberate, audit-visible act* — the "bypass rules" button, or a
   bot pushing a tag. Right for release acts; wrong for anything that
   must complete unattended on a PR.
+
+  `bypass_apps` takes App **names** — keys of the same organization's
+  `apps` map — and the loader reads each id back out of the App's own
+  row. The id is a fact the registry already states once; stating it a
+  second time inside a ruleset makes it hand-copied, unreadable and
+  stale the moment an App is recreated. A name that does not resolve is
+  a LOAD ERROR naming the repository and the ruleset, never an actor
+  that quietly goes missing — a dropped bypass says nothing until the
+  act it permits is refused. Resolution is org-scoped: a ruleset can
+  only name an App its own organization declares.
 - **`enforce_admins: false`** is the blunt escape hatch: admins ignore
   the whole classic rule set. Prefer the two above.
 
