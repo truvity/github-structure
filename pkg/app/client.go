@@ -1,3 +1,13 @@
+// Package app is the GitHub App side of the structure engine: the App
+// JWT, the REST client the engine and preflight probe live state with,
+// and the drift checks that compare a live organization against its
+// registry.
+//
+// It does NOT create Apps. An App's existence, its key and its
+// installation are the credential custodian's business (for truvity,
+// access-roster's App catalogue); this package only authenticates AS an
+// App whose credentials it is handed, and reports where live GitHub has
+// wandered away from what the registry declares.
 package app
 
 import (
@@ -9,6 +19,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+)
+
+const (
+	// apiBase is the REST host every call here goes to.
+	apiBase = "https://api.github.com"
+
+	apiVersionHeader = "X-GitHub-Api-Version"
+	apiVersion       = "2022-11-28"
 )
 
 // ErrNotFound is returned when GitHub answers 404 — for the callers here
@@ -40,28 +58,6 @@ type (
 		Permissions map[string]string `json:"permissions"`
 	}
 )
-
-// Describe reads the App's own record. Useful for the fields GitHub only
-// exposes to the App itself — notably client_id, which the
-// create-github-app-token action now prefers over app-id.
-func Describe(ctx context.Context, appID int64, privateKey []byte) (*Info, error) {
-	assertion, err := JWT(appID, privateKey)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := newAPIRequest(ctx, http.MethodGet, "/app", "Bearer "+assertion)
-	if err != nil {
-		return nil, err
-	}
-
-	var info Info
-	if err := doJSON(req, &info); err != nil {
-		return nil, err
-	}
-
-	return &info, nil
-}
 
 // NewClient mints an installation token for the App.
 func NewClient(ctx context.Context, appID int64, privateKey []byte, installationID int64) (*Client, error) {

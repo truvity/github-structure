@@ -4,28 +4,24 @@ The engine is designed to take over estates that already exist. The
 order below is the one that worked twice in the source estate — once for
 a 60-repo organization, once for its sister org.
 
-## 0. Create the engine's App — one browser click
+## 0. Create the engine's App
 
 The engine authenticates as a GitHub App, never a PAT: an apply is then
-attributable to the engine, not to whoever last ran it. GitHub has no
-API to create an App; `pkg/app`'s manifest flow automates everything
-around the one thing it cannot:
+attributable to the engine, not to whoever last ran it.
 
-1. The manifest (name, permissions, webhook) renders from the App's
-   registry row.
-2. A local HTTP listener serves the one-click creation redirect; you
-   click once in the browser.
-3. GitHub returns a code; the flow exchanges it for the App's
-   credentials and hands them back to the CALLER. Where they live —
-   1Password, SSM, SOPS — is your estate's decision; the library never
-   stores them.
+Creating that App is NOT this library's job, and deliberately so. GitHub
+has no API for it — creation and installation are both browser clicks —
+so the act belongs wherever your estate already holds credentials, next
+to the key it produces. (In the source estate that is an App catalogue
+that creates the App, keeps the key and projects it into a secret
+store.) A library that also minted Apps would be a second place keys
+come from.
 
-Install the App on the organization (one more click; GitHub has no API
-for that either), record the installation ID, and put all three values
-where your deploy can read them (`engine_credentials` in the registry
-names that place: an SSM-shaped prefix, or one OpenBAO KV v2 secret).
-It is per-org, so orgs can sit in different stores while an estate
-moves between them.
+What this library needs is the finished credential: app id, installation
+id, private key, in a place your deploy can read. `engine_credentials`
+in the registry names that place — an SSM-shaped prefix, or one OpenBAO
+KV v2 secret. It is per-org, so orgs can sit in different stores while
+an estate moves between them.
 
 App permissions the engine needs: Administration (org+repo, RW),
 Members (RW), Actions/Workflows metadata (R), plus whatever your drift
