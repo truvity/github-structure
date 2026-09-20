@@ -28,8 +28,18 @@ profiles:            # shared, top-level — the whole point
 
 orgs:
   <login>:
-    credentials_ssm_prefix: …     # where YOUR estate keeps the engine
-                                  # App's credentials; shape is yours
+    engine_credentials:           # where YOUR estate keeps the engine
+      ssm_prefix: …               # App's credentials for THIS org —
+                                  # exactly one source. Either an
+                                  # SSM-shaped prefix (one parameter per
+                                  # field)…
+      openbao:                    # …or one OpenBAO/Vault KV v2 secret
+        namespace: …              # (optional; empty = root)
+        mount: kv                 # the KV v2 mount
+        path: …                   # the secret, with no `data/` segment
+                                  # The property/parameter NAMES inside
+                                  # are your estate's convention; the
+                                  # library declares the place only.
     app_prefix: "{org}-"          # display names are globally unique
     settings: {…}                 # org-level toggles
     owners: [login, …]            # asserted (promote-only) + drift-checked

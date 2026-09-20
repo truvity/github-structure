@@ -54,7 +54,8 @@ access:
 orgs:
   acme:
     app_prefix: acme-
-    credentials_ssm_prefix: /creds/structure-engine/acme
+    engine_credentials:
+      ssm_prefix: /creds/structure-engine/acme
     settings:
       default_repository_permission: none
       members_can_create_repositories: true

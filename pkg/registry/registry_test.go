@@ -53,7 +53,8 @@ access:
 orgs:
   acme:
     app_prefix: acme-
-    credentials_ssm_prefix: /creds/structure-engine/acme
+    engine_credentials:
+      ssm_prefix: /creds/structure-engine/acme
     settings:
       default_repository_permission: none
       members_can_create_repositories: true
@@ -108,6 +109,85 @@ func TestLoadMinimal(t *testing.T) {
 	assert.Equal(t, []string{"acme"}, c.SortedOrgs())
 	assert.Equal(t, []string{"engineers", "management"}, c.Orgs["acme"].SortedTeams())
 	assert.Equal(t, "acme-", c.AppPrefixFor("acme"))
+}
+
+// ── the engine's own credentials ───────────────────────────────────────
+
+const (
+	// ssmSource is the minimal registry's engine credential source; the
+	// cases below swap it for another shape.
+	ssmSource = `    engine_credentials:
+      ssm_prefix: /creds/structure-engine/acme
+`
+)
+
+func TestEngineCredentialsAcceptOpenBAO(t *testing.T) {
+	body := strings.Replace(minimal, ssmSource, `    engine_credentials:
+      openbao:
+        namespace: management
+        mount: kv
+        path: github-apps/acme-iac
+`, 1)
+
+	c, err := load(t, body)
+	require.NoError(t, err)
+
+	creds := c.Orgs["acme"].EngineCredentials
+	require.NotNil(t, creds.OpenBAO)
+	assert.Equal(t, "management/kv/github-apps/acme-iac", creds.OpenBAO.String())
+	assert.Equal(t, "openbao management/kv/github-apps/acme-iac", creds.Describe())
+}
+
+func TestEngineCredentialsDescribeSSM(t *testing.T) {
+	c, err := load(t, minimal)
+	require.NoError(t, err)
+
+	assert.Equal(t, "ssm /creds/structure-engine/acme", c.Orgs["acme"].EngineCredentials.Describe())
+}
+
+func TestEngineCredentialsAreRequired(t *testing.T) {
+	body := strings.Replace(minimal, ssmSource, "", 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "engine_credentials is required")
+}
+
+func TestEngineCredentialsRejectAnEmptySource(t *testing.T) {
+	body := strings.Replace(minimal, ssmSource, "    engine_credentials: {}\n", 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "names no source")
+}
+
+func TestEngineCredentialsRejectTwoSources(t *testing.T) {
+	body := strings.Replace(minimal, ssmSource, `    engine_credentials:
+      ssm_prefix: /creds/structure-engine/acme
+      openbao:
+        mount: kv
+        path: github-apps/acme-iac
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exactly one")
+}
+
+func TestEngineCredentialsOpenBAONeedsMountAndPath(t *testing.T) {
+	for _, tc := range []struct{ name, block, want string }{
+		{"no mount", "        path: github-apps/acme-iac\n", "mount is required"},
+		{"no path", "        mount: kv\n", "path is required"},
+		{"the API path", "        mount: kv\n        path: kv/data/github-apps/acme-iac\n", "`data/` segment"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.Replace(minimal, ssmSource, "    engine_credentials:\n      openbao:\n"+tc.block, 1)
+
+			_, err := load(t, body)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
 }
 
 func TestLoadRejectsUnknownKeys(t *testing.T) {
