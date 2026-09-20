@@ -475,9 +475,17 @@ type (
 		// specific App direct-push without CI (the Kargo promotion
 		// writer, gitops). Leave empty to require no checks.
 		RequiredChecks []string `yaml:"required_checks,omitempty"`
-		// BypassApps are GitHub App DATABASE ids (not node ids) allowed
-		// to bypass — how renovate automerges its green PRs.
-		BypassApps []int `yaml:"bypass_apps"`
+		// BypassApps are the names of Apps allowed to bypass — how
+		// renovate automerges its green PRs. Each name is a key in the
+		// SAME org's `apps` map, and Org.BypassAppIDs turns it into the
+		// GitHub App database id the REST API wants.
+		//
+		// Names, not ids, because an id is a fact about an App that the
+		// registry already records once, in the App's own row. Written
+		// out a second time here it is hand-copied, unreadable, and stale
+		// the moment an App is recreated — and a stale bypass does not
+		// announce itself, it refuses one release act.
+		BypassApps []string `yaml:"bypass_apps"`
 		// BypassOrgAdmins lets organization admins merge without the
 		// review. Rulesets, unlike classic protection, do NOT exempt
 		// admins implicitly: moving bar's approval gate into a ruleset
@@ -499,12 +507,15 @@ type (
 		// nobody can bypass makes the tag namespace permanently
 		// unwritable, which is a bricked release path, not protection.
 		BypassTeams []string `yaml:"bypass_teams"`
-		// BypassApps are GitHub App DATABASE ids (not node ids) allowed
-		// the same tag acts as Integration actors — how a scheduled
-		// auto-release cuts its tag without a human in the release
-		// team. Additive to BypassTeams, which stays required: an App
-		// key can rotate away, a team cannot.
-		BypassApps []int `yaml:"bypass_apps,omitempty"`
+		// BypassApps are the names of Apps allowed the same tag acts as
+		// Integration actors — how a scheduled auto-release cuts its tag
+		// without a human in the release team. Additive to BypassTeams,
+		// which stays required: an App key can rotate away, a team
+		// cannot.
+		//
+		// Same vocabulary as the branch ruleset's field: a key in this
+		// org's `apps` map, resolved by Org.BypassAppIDs.
+		BypassApps []string `yaml:"bypass_apps,omitempty"`
 		// BypassOrgAdmins additionally lets org admins act on matching
 		// tags — the audit-visible break-glass, same semantics as the
 		// branch-ruleset field (OrganizationAdmin actor, id 0: GitHub
@@ -1049,7 +1060,7 @@ func (c *Config) validateRepos(login string, org *Org) error {
 			return err
 		}
 
-		if err := validateBranchRulesets(login, name, repo); err != nil {
+		if err := validateBranchRulesets(login, name, org, repo); err != nil {
 			return err
 		}
 
@@ -1219,6 +1230,10 @@ func validateTagRulesets(login, name string, org *Org, repo *Repo) error {
 					login, name, rs.Name, team)
 			}
 		}
+
+		if _, err := org.BypassAppIDs(rs.BypassApps); err != nil {
+			return fmt.Errorf("org %q repo %q: tag ruleset %q: %w", login, name, rs.Name, err)
+		}
 	}
 
 	return nil
@@ -1227,7 +1242,7 @@ func validateTagRulesets(login, name string, org *Org, repo *Repo) error {
 // validateBranchRulesets checks one repo's branch_rulesets rows: named,
 // enforcing something, and bypassable — without a bypass the gate
 // belongs in classic protection (see the BranchRuleset field comment).
-func validateBranchRulesets(login, name string, repo *Repo) error {
+func validateBranchRulesets(login, name string, org *Org, repo *Repo) error {
 	for i, rs := range repo.BranchRulesets {
 		switch {
 		case rs == nil || rs.Name == "":
@@ -1241,9 +1256,80 @@ func validateBranchRulesets(login, name string, repo *Repo) error {
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: a bypass is required (bypass_apps"+
 				" or bypass_org_admins) — without one this belongs in classic protection", login, name, rs.Name)
 		}
+
+		if _, err := org.BypassAppIDs(rs.BypassApps); err != nil {
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: %w", login, name, rs.Name, err)
+		}
 	}
 
 	return nil
+}
+
+// BypassAppIDs resolves ruleset bypass App names to the GitHub App
+// DATABASE ids the REST API takes as Integration bypass actors.
+//
+// The registry already states every id once, in the App's own row, so a
+// ruleset names the App and this reads the id back out. No API call is
+// involved: a bypass actor is decided by the file, the way every other
+// reference in it is.
+//
+// Org-scoped on purpose — the receiver IS the scope. A ruleset on a
+// repository in one organization can only name an App that organization
+// declares; an App row in a sibling org is not in `o.Apps` and so does
+// not resolve, which is the correct answer rather than a near miss.
+//
+// An unknown name is an ERROR and never an empty slice. Silently
+// dropping an unresolvable bypass actor is precisely the failure this
+// vocabulary exists to prevent: the ruleset stays, the actor does not,
+// and nothing says so until a release act is refused.
+func (o *Org) BypassAppIDs(names []string) ([]int, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	ids := make([]int, 0, len(names))
+
+	for _, appName := range names {
+		// YAML happily reads a bare 4597170 as the string "4597170", so
+		// the old spelling would otherwise arrive here as a name that
+		// merely fails to resolve. Say what actually changed instead.
+		if isAllDigits(appName) {
+			return nil, fmt.Errorf("bypass app %q looks like a GitHub App database id:"+
+				" this field takes App NAMES (keys of this org's apps), and the id is read"+
+				" from the App's own row", appName)
+		}
+
+		app, ok := o.Apps[appName]
+		if !ok {
+			return nil, fmt.Errorf("bypass app %q is not declared in this org's apps —"+
+				" a bypass actor that does not resolve would be dropped, not defaulted", appName)
+		}
+
+		if app.AppID == 0 {
+			return nil, fmt.Errorf("bypass app %q has no app_id, so it cannot be a bypass actor —"+
+				" record the id on the App row (it exists the moment the App does)", appName)
+		}
+
+		ids = append(ids, int(app.AppID))
+	}
+
+	return ids, nil
+}
+
+// isAllDigits reports whether s is a non-empty run of ASCII digits —
+// the shape of the database id this field used to take.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+
+	return true
 }
 
 // protectionEnforcesAnything reports whether a rule actually restricts

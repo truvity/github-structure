@@ -244,17 +244,137 @@ func TestBranchRulesetAcceptsOrgAdminOnlyBypass(t *testing.T) {
 // status checks and has a bypass — the shape that lets an App direct-push
 // past CI (Kargo promotions) while everyone else stays gated.
 func TestBranchRulesetAcceptsChecksOnlyWithBypass(t *testing.T) {
-	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+	body := withBypassApp(strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: master-check
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 0
+            required_checks: [check]
+            bypass_apps: [acme-releases]
+`, 1))
+
+	_, err := load(t, body)
+	require.NoError(t, err)
+}
+
+// ── bypass App names ───────────────────────────────────────────────────
+
+// The registry states an App's database id ONCE, on the App's own row.
+// A ruleset names the App, and the loaded config resolves the name to
+// exactly that id — the same integer the engine used to be handed
+// directly, so nothing the engine renders moves.
+func TestBypassAppNameResolvesToTheAppRowID(t *testing.T) {
+	body := withBypassApp(strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: master-check
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 0
+            required_checks: [check]
+            bypass_apps: [acme-releases]
+        tag_rulesets:
+          - name: release-tags
+            pattern: refs/tags/v*
+            bypass_teams: [engineers]
+            bypass_apps: [acme-releases]
+`, 1))
+
+	c, err := load(t, body)
+	require.NoError(t, err)
+
+	org := c.Orgs["acme"]
+	repo := org.Repos["widget"]
+
+	branchIDs, err := org.BypassAppIDs(repo.BranchRulesets[0].BypassApps)
+	require.NoError(t, err)
+	assert.Equal(t, []int{12345}, branchIDs)
+
+	tagIDs, err := org.BypassAppIDs(repo.TagRulesets[0].BypassApps)
+	require.NoError(t, err)
+	assert.Equal(t, []int{12345}, tagIDs)
+}
+
+// An unresolvable name is a LOAD error naming the row and the ruleset,
+// never a bypass actor that quietly goes missing. A dropped actor is
+// invisible until the act it permits is refused, which is a release
+// path breaking with no change to the file that broke it.
+func TestBypassAppRejectsUnknownName(t *testing.T) {
+	body := withBypassApp(strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: master-check
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 0
+            required_checks: [check]
+            bypass_apps: [acme-typo]
+`, 1))
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `org "acme" repo "widget"`)
+	assert.Contains(t, err.Error(), `branch ruleset "master-check"`)
+	assert.Contains(t, err.Error(), `bypass app "acme-typo" is not declared`)
+}
+
+// Tag rulesets speak the same vocabulary, and report the same way: the
+// tag namespace is where the missing actor bites (a refused release
+// tag), so its error must name the ruleset too.
+func TestBypassAppRejectsUnknownNameOnTagRuleset(t *testing.T) {
+	body := withBypassApp(strings.Replace(minimal, "        preset: public\n", `        preset: public
+        tag_rulesets:
+          - name: release-tags
+            pattern: refs/tags/v*
+            bypass_teams: [engineers]
+            bypass_apps: [acme-typo]
+`, 1))
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `tag ruleset "release-tags"`)
+	assert.Contains(t, err.Error(), `bypass app "acme-typo" is not declared`)
+}
+
+// Resolution is org-scoped: the receiver IS the scope. An App declared
+// in a sibling organization is not this org's App, and a name that
+// resolves "somewhere in the file" would let one org's ruleset grant a
+// bypass to an identity its owners never declared.
+func TestBypassAppDoesNotResolveAcrossOrgs(t *testing.T) {
+	// `acme` carries the ruleset and declares no Apps at all.
+	withRuleset := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: master-check
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 0
+            required_checks: [check]
+            bypass_apps: [acme-releases]
+`, 1)
+
+	// A second organization, identical but for the App row it holds.
+	_, orgBody, found := strings.Cut(minimal, "  acme:\n")
+	require.True(t, found)
+
+	body := withRuleset + "  other:\n" + withBypassApp(orgBody)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `org "acme" repo "widget"`)
+	assert.Contains(t, err.Error(), `bypass app "acme-releases" is not declared`)
+}
+
+// Database ids are no longer a spelling this field accepts. Keeping both
+// forms would keep the habit that made the ids stale in the first place,
+// so the transition is one-way and the loader says so in type terms.
+func TestBypassAppRejectsDatabaseID(t *testing.T) {
+	body := withBypassApp(strings.Replace(minimal, "        preset: public\n", `        preset: public
         branch_rulesets:
           - name: master-check
             pattern: ~DEFAULT_BRANCH
             required_approvals: 0
             required_checks: [check]
             bypass_apps: [12345]
-`, 1)
+`, 1))
 
 	_, err := load(t, body)
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "looks like a GitHub App database id")
 }
 
 // A ruleset that enforces neither approvals nor checks is noise.
@@ -497,6 +617,21 @@ func TestNestedTeamCannotBeSecret(t *testing.T) {
 // it would land under `repos:`, which comes last.
 func withApps(appsYAML string) string {
 	return strings.Replace(minimal, "    apps: {}\n", "    apps:\n"+appsYAML, 1)
+}
+
+// withBypassApp gives a fixture body one App row a ruleset can name.
+// External, so the row needs no credentials of ours — what matters to a
+// bypass actor is the id, and every App row carries it.
+func withBypassApp(body string) string {
+	return strings.Replace(body, "    apps: {}\n", `    apps:
+      acme-releases:
+        external: true
+        app_id: 12345
+        installation_id: 67890
+        install: all
+        permissions:
+          metadata: read
+`, 1)
 }
 
 func TestAppOursNeedsPrefix(t *testing.T) {
