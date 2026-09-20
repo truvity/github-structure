@@ -196,10 +196,14 @@ type (
 		// this org — App display names are globally unique on GitHub.
 		// Defaults to "{org}-".
 		AppPrefix string `yaml:"app_prefix,omitempty"`
-		// CredentialsSSMPrefix is where the structure engine's own App
-		// credentials live in the estate's secret store — the caller
-		// reads them from there and hands engine.Credentials to Deploy.
-		CredentialsSSMPrefix string `yaml:"credentials_ssm_prefix"`
+		// EngineCredentials says WHERE the credentials of the App this
+		// engine acts as, for this org, are kept — the caller reads
+		// them from there and hands engine.Credentials to Deploy. It is
+		// per-org because each org has its own engine App, and those
+		// Apps need not live in the same store: an estate moving from
+		// one secret store to another moves one org at a time, and the
+		// half-migrated state has to be declarable.
+		EngineCredentials *EngineCredentials `yaml:"engine_credentials"`
 		// Settings are the org-level toggles.
 		Settings *OrgSettings `yaml:"settings"`
 		// Owners are the organization's owners (GitHub's `admin` org
@@ -659,6 +663,33 @@ type (
 		SSMPrefix string `yaml:"ssm_prefix,omitempty"`
 	}
 
+	// EngineCredentials is one org's engine-App credential source:
+	// EXACTLY ONE of the fields below. Only the LOCATION is declared —
+	// what the three credential values are called inside it is the
+	// estate's convention (for SSM, the field names under FieldAppID and
+	// friends), because the thing that writes them is the estate's too.
+	EngineCredentials struct {
+		// SSMPrefix is a prefix in an AWS-SSM-shaped store holding one
+		// parameter per credential field.
+		SSMPrefix string `yaml:"ssm_prefix,omitempty"`
+		// OpenBAO is one KV v2 secret holding all three credential
+		// values as properties.
+		OpenBAO *OpenBAOSecret `yaml:"openbao,omitempty"`
+	}
+
+	// OpenBAOSecret locates one secret in an OpenBAO (or Vault) KV v2
+	// mount. Nothing here is a credential: it is a path.
+	OpenBAOSecret struct {
+		// Namespace is the OpenBAO namespace the mount lives in. Empty
+		// means root.
+		Namespace string `yaml:"namespace,omitempty"`
+		// Mount is the KV v2 mount path.
+		Mount string `yaml:"mount"`
+		// Path is the secret's path inside the mount, with no `data/`
+		// segment: that is the KV v2 API's, not the secret's.
+		Path string `yaml:"path"`
+	}
+
 	// RunnerGroup is an Actions runner group — the GitHub-side half of
 	// the ARC scale-set model (which repos may target which runners).
 	RunnerGroup struct {
@@ -853,6 +884,54 @@ func validateOwners(login string, owners []string) error {
 	return nil
 }
 
+// validateEngineCredentials refuses an org whose engine App credentials
+// are nowhere, or in two places at once. Which of the two an org uses is
+// a fact about that org and nothing else reads it, so a caller can
+// switch one org's source without touching the other's.
+func validateEngineCredentials(login string, creds *EngineCredentials) error {
+	switch {
+	case creds == nil:
+		return fmt.Errorf("org %q: engine_credentials is required: the engine acts as an App, and the caller has to know where its credentials are", login)
+	case creds.SSMPrefix == "" && creds.OpenBAO == nil:
+		return fmt.Errorf("org %q: engine_credentials names no source: set ssm_prefix or openbao", login)
+	case creds.SSMPrefix != "" && creds.OpenBAO != nil:
+		return fmt.Errorf("org %q: engine_credentials names both ssm_prefix and openbao: exactly one, so a read cannot pick the stale one", login)
+	case creds.OpenBAO != nil && creds.OpenBAO.Mount == "":
+		return fmt.Errorf("org %q: engine_credentials.openbao.mount is required", login)
+	case creds.OpenBAO != nil && creds.OpenBAO.Path == "":
+		return fmt.Errorf("org %q: engine_credentials.openbao.path is required", login)
+	case creds.OpenBAO != nil && strings.Contains(creds.OpenBAO.Path, "/data/"):
+		return fmt.Errorf("org %q: engine_credentials.openbao.path %q carries the KV v2 API's `data/` segment: name the secret, not the endpoint",
+			login, creds.OpenBAO.Path)
+	}
+
+	return nil
+}
+
+// Describe names an engine credential source for an error message or a
+// log line: the kind and the location, never a value.
+func (e *EngineCredentials) Describe() string {
+	switch {
+	case e == nil:
+		return "no declared source"
+	case e.OpenBAO != nil:
+		return "openbao " + e.OpenBAO.String()
+	default:
+		return "ssm " + e.SSMPrefix
+	}
+}
+
+// String is the secret's location, written the way an operator would
+// look it up: namespace, mount, path.
+func (s *OpenBAOSecret) String() string {
+	namespace := s.Namespace
+	if namespace == "" {
+		namespace = "root"
+	}
+
+	return namespace + "/" + s.Mount + "/" + s.Path
+}
+
 func (c *Config) validateOrg(login string, org *Org) error {
 	if !slugPattern.MatchString(login) {
 		return fmt.Errorf("org %q: invalid login", login)
@@ -891,11 +970,13 @@ func (c *Config) validateOrg(login string, org *Org) error {
 		}
 	}
 
-	// The prefix's SHAPE (e.g. a "/secrets/" mirror convention) is the
-	// consuming estate's rule, asserted in its own registry tests; the
-	// library requires only that an engine credential source exists.
-	if org.CredentialsSSMPrefix == "" {
-		return fmt.Errorf("org %q: credentials_ssm_prefix is required", login)
+	// The location's SHAPE (e.g. a "/secrets/" mirror convention, or
+	// which namespace an estate keeps App keys in) is the consuming
+	// estate's rule, asserted in its own registry tests; the library
+	// requires only that exactly one engine credential source exists,
+	// so a read can never silently pick the wrong one.
+	if err := validateEngineCredentials(login, org.EngineCredentials); err != nil {
+		return err
 	}
 
 	if err := validateOwners(login, org.Owners); err != nil {

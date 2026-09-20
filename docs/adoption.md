@@ -22,8 +22,10 @@ around the one thing it cannot:
 
 Install the App on the organization (one more click; GitHub has no API
 for that either), record the installation ID, and put all three values
-where your deploy can read them (`credentials_ssm_prefix` in the
-registry names that place).
+where your deploy can read them (`engine_credentials` in the registry
+names that place: an SSM-shaped prefix, or one OpenBAO KV v2 secret).
+It is per-org, so orgs can sit in different stores while an estate
+moves between them.
 
 App permissions the engine needs: Administration (org+repo, RW),
 Members (RW), Actions/Workflows metadata (R), plus whatever your drift
