@@ -18,121 +18,6 @@ import (
 	registry "github.com/truvity/github-structure/pkg/registry"
 )
 
-// ── manifest ───────────────────────────────────────────────────────────
-
-func ourApp() *registry.App {
-	return &registry.App{
-		Description: "Line one\n  line two\n",
-		URL:         "https://github.com/truvity/gitops",
-		Install:     registry.InstallAll,
-		Permissions: map[string]string{
-			"organization_administration": "write",
-			"administration":              "write",
-			"contents":                    "read",
-			"metadata":                    "read",
-		},
-		Credentials: &registry.AppCredentials{
-			OpItem:    "github-app-truvity-iac",
-			SSMPrefix: "/creds/structure-engine/example",
-		},
-	}
-}
-
-func TestBuildManifest(t *testing.T) {
-	got, err := BuildManifest("truvity-iac", ourApp(), "http://127.0.0.1:9797/callback")
-	require.NoError(t, err)
-
-	assert.Equal(t, "truvity-iac", got.Name)
-	assert.Equal(t, "http://127.0.0.1:9797/callback", got.RedirectURL)
-	assert.False(t, got.Public, "our Apps must never be public")
-	assert.Nil(t, got.HookAttrs, "API-only Apps carry no webhook block at all")
-
-	// The folded YAML description becomes one line.
-	assert.Equal(t, "Line one line two", got.Description)
-
-	// Permissions come from the registry row verbatim, except metadata —
-	// GitHub grants it implicitly and rejects it in a manifest.
-	assert.Equal(t, map[string]string{
-		"organization_administration": "write",
-		"administration":              "write",
-		"contents":                    "read",
-	}, got.DefaultPerm)
-}
-
-func TestBuildManifestRefusesExternal(t *testing.T) {
-	app := ourApp()
-	app.External = true
-	app.Credentials = nil
-
-	_, err := BuildManifest("slack", app, "http://127.0.0.1:9797/callback")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "external")
-}
-
-// Re-creating an adopted App would mint a SECOND App with a colliding
-// display name — GitHub allows it, and the result is a confusing mess.
-func TestBuildManifestRefusesAdopted(t *testing.T) {
-	app := ourApp()
-	app.Adopted = true
-	app.AppID = 4260816
-
-	_, err := BuildManifest("truvity-arc-preview", app, "http://127.0.0.1:9797/callback")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "already exists")
-}
-
-func TestManifestSerialisesAsGitHubExpects(t *testing.T) {
-	manifest, err := BuildManifest("truvity-iac", ourApp(), "http://127.0.0.1:9797/callback")
-	require.NoError(t, err)
-
-	body, err := json.Marshal(manifest)
-	require.NoError(t, err)
-
-	var round map[string]any
-	require.NoError(t, json.Unmarshal(body, &round))
-
-	// Field names are GitHub's, not ours — a rename here breaks the flow
-	// silently (GitHub ignores unknown keys and creates a bare App).
-	assert.Contains(t, round, "name")
-	assert.Contains(t, round, "url")
-	assert.Contains(t, round, "redirect_url")
-	assert.Contains(t, round, "default_permissions")
-
-	// GitHub REQUIRES `url` inside hook_attributes whenever the object is
-	// present, and rejects the manifest with "url wasn't supplied" — an
-	// error that reads as though the TOP-LEVEL url were missing. Sending
-	// {"active": false} cost a real click sitting on 2026-07-28.
-	assert.NotContains(t, round, "hook_attributes",
-		"an API-only App must omit hook_attributes entirely, not send it empty")
-}
-
-func TestBuildManifestIncludesWebhookWhenConfigured(t *testing.T) {
-	app := ourApp()
-	app.WebhookURL = "https://example.com/hook"
-
-	got, err := BuildManifest("truvity-hooked", app, "http://127.0.0.1:9797/callback")
-	require.NoError(t, err)
-
-	require.NotNil(t, got.HookAttrs)
-	assert.Equal(t, "https://example.com/hook", got.HookAttrs.URL)
-	assert.True(t, got.HookAttrs.Active)
-
-	// And when present it must carry the url GitHub demands.
-	body, err := json.Marshal(got)
-	require.NoError(t, err)
-	assert.Contains(t, string(body), `"hook_attributes":{"url":"https://example.com/hook"`)
-}
-
-func TestCreateAndInstallURLs(t *testing.T) {
-	assert.Equal(t,
-		"https://github.com/organizations/truvity/settings/apps/new?state=abc",
-		CreateURL("truvity", "abc"))
-
-	assert.Equal(t,
-		"https://github.com/apps/truvity-iac/installations/new",
-		InstallURL("truvity-iac"))
-}
-
 // ── JWT ────────────────────────────────────────────────────────────────
 
 func TestJWTVerifies(t *testing.T) {
@@ -251,15 +136,6 @@ func TestCompareAppDetectsScopeChange(t *testing.T) {
 	assert.Equal(t, "install", drifts[0].Field)
 	assert.Equal(t, "selected", drifts[0].Want)
 	assert.Equal(t, "all", drifts[0].Got)
-}
-
-// ── 1Password field handling ───────────────────────────────────────────
-
-// The bug this guards: recording an installation ID after the install
-// click must not drop the private key written moments earlier.
-func TestCollapse(t *testing.T) {
-	assert.Equal(t, "one two three", collapse("one\n  two\n  three\n"))
-	assert.Equal(t, "", collapse("   \n  "))
 }
 
 // TestCompareOrgVariables exercises each way a variable can drift, and

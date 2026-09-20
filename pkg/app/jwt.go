@@ -10,19 +10,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 )
-
-// errNotInstalled means the App exists but no installation on the target
-// org has appeared yet — the state we poll through, not a failure.
-var errNotInstalled = errors.New("app not installed on the org")
-
-func isNotInstalled(err error) bool { return errors.Is(err, errNotInstalled) }
 
 // JWT mints the short-lived RS256 assertion an App authenticates with
 // (GitHub caps the lifetime at 10 minutes and rejects future-dated iat,
@@ -95,61 +88,6 @@ func parseRSAKey(data []byte) (*rsa.PrivateKey, error) {
 	return key, nil
 }
 
-// FindInstallation returns the App's installation ID on the given org.
-func FindInstallation(ctx context.Context, appID int64, privateKey []byte, org string) (int64, error) {
-	var installations []struct {
-		ID      int64 `json:"id"`
-		Account struct {
-			Login string `json:"login"`
-		} `json:"account"`
-	}
-
-	if err := appGet(ctx, appID, privateKey, "/app/installations?per_page=100", &installations); err != nil {
-		return 0, err
-	}
-
-	for _, inst := range installations {
-		if strings.EqualFold(inst.Account.Login, org) {
-			return inst.ID, nil
-		}
-	}
-
-	return 0, errNotInstalled
-}
-
-// InstallationRepos lists the repositories a `selected`-scope
-// installation covers. This is the ONLY way to read that scope — there
-// is no endpoint a user token can call (snapshot §4.3) — which is why
-// our own Apps can be reconciled and vendor ones cannot.
-func InstallationRepos(ctx context.Context, appID int64, privateKey []byte, installationID int64) ([]string, error) {
-	token, err := installationToken(ctx, appID, privateKey, installationID)
-	if err != nil {
-		return nil, err
-	}
-
-	var page struct {
-		Repositories []struct {
-			Name string `json:"name"`
-		} `json:"repositories"`
-	}
-
-	req, err := newAPIRequest(ctx, http.MethodGet, "/installation/repositories?per_page=100", "token "+token)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := doJSON(req, &page); err != nil {
-		return nil, err
-	}
-
-	names := make([]string, 0, len(page.Repositories))
-	for _, r := range page.Repositories {
-		names = append(names, r.Name)
-	}
-
-	return names, nil
-}
-
 func installationToken(ctx context.Context, appID int64, privateKey []byte, installationID int64) (string, error) {
 	assertion, err := JWT(appID, privateKey)
 	if err != nil {
@@ -171,20 +109,6 @@ func installationToken(ctx context.Context, appID int64, privateKey []byte, inst
 	}
 
 	return out.Token, nil
-}
-
-func appGet(ctx context.Context, appID int64, privateKey []byte, path string, dst any) error {
-	assertion, err := JWT(appID, privateKey)
-	if err != nil {
-		return err
-	}
-
-	req, err := newAPIRequest(ctx, http.MethodGet, path, "Bearer "+assertion)
-	if err != nil {
-		return err
-	}
-
-	return doJSON(req, dst)
 }
 
 func newAPIRequest(ctx context.Context, method, path, authorization string) (*http.Request, error) {

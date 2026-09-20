@@ -605,16 +605,9 @@ type (
 		// External marks a vendor App: inventory + drift detection only.
 		// We never create, install or edit those.
 		External bool `yaml:"external,omitempty"`
-		// Adopted marks an App we author that predates this registry and
-		// whose 1Password item has not been normalized to the field
-		// convention yet. Such a row is inventory + drift only until the
-		// item is normalized and credentials are filled in — at which
-		// point the flag goes away. It is deliberately narrow: a row can
-		// be credential-less only by admitting it in writing.
-		Adopted bool `yaml:"adopted,omitempty"`
-		// Description is the App blurb (ours: rendered into the manifest).
+		// Description is the App blurb, as GitHub shows it.
 		Description string `yaml:"description,omitempty"`
-		// URL is the App's homepage (ours: required by the manifest flow).
+		// URL is the App's homepage.
 		URL string `yaml:"url,omitempty"`
 		// AppID and InstallationID are recorded once known. Optional —
 		// drift detection keys on the App slug, so a freshly registered
@@ -632,35 +625,12 @@ type (
 		Permissions map[string]string `yaml:"permissions"`
 		// Events are the webhook events the App subscribes to.
 		Events []string `yaml:"events,omitempty"`
-		// WebhookURL is where GitHub delivers events. Empty means the App
-		// is API-only and the manifest omits the webhook block entirely —
-		// GitHub rejects a hook_attributes object that has no url.
+		// WebhookURL is where GitHub delivers events. Empty means the
+		// App is API-only.
 		WebhookURL string `yaml:"webhook_url,omitempty"`
-		// Credentials locate the App's secrets. Required for ours,
-		// forbidden for external rows (we never hold vendor keys).
-		Credentials *AppCredentials `yaml:"credentials,omitempty"`
 		// Note carries context a future reader needs (why it exists, what
 		// replaced it, which ticket retires it).
 		Note string `yaml:"note,omitempty"`
-	}
-
-	// AppCredentials is the one credential doctrine: 1Password is the
-	// source of truth, SSM is the mirror. The field names inside the
-	// 1Password item are fixed by convention (see FieldAppID and friends).
-	AppCredentials struct {
-		// OpItem names the item in the estate's credential store (for
-		// truvity, a 1Password item in the breakglass vault). Always
-		// required: every App the engine authors has a source of truth.
-		OpItem string `yaml:"op_item"`
-		// SSMPrefix is where the estate mirrors the item for machine
-		// consumers (for truvity, cfg/secrets.yaml → SSM).
-		//
-		// Optional, because mirroring is a CONSUMER's need, not a
-		// property of the App. An App consumed only from GitHub itself
-		// (Renovate on public repos, whose key is copied by hand into a
-		// scoped org secret — INF-491) has a 1Password item and no SSM
-		// path at all.
-		SSMPrefix string `yaml:"ssm_prefix,omitempty"`
 	}
 
 	// EngineCredentials is one org's engine-App credential source:
@@ -701,30 +671,14 @@ type (
 	}
 )
 
-// InstallationIDField returns the field holding an App's installation ID
-// for the given organization. The App's PRIMARY org uses the bare
-// `github-installation-id`; any additional installation of the same App
-// — the roster's sandbox org being the one sanctioned case — is suffixed
-// with the org, so a test installation can never be mistaken for, or
-// overwrite, the production one.
-func InstallationIDField(org, primaryOrg string) string {
-	if org == "" || org == primaryOrg {
-		return FieldInstallationID
-	}
-
-	return FieldInstallationID + "-" + org
-}
-
-// The credential field-name convention for App credentials. Every App's
-// secret-store item uses exactly these names, so a consumer (or an AI
-// agent session) can find credentials knowing only the App name.
+// The field-name convention an SSM-shaped engine credential follows:
+// one parameter per name under EngineCredentials.SSMPrefix. Nothing here
+// creates or writes those parameters — whoever holds the App key does
+// that — but the engine has to know what to read.
 const (
 	FieldAppID          = "github-app-id"
 	FieldInstallationID = "github-installation-id"
 	FieldPrivateKey     = "github-private-key"
-	FieldClientID       = "github-client-id"
-	FieldClientSecret   = "github-client-secret"
-	FieldWebhookSecret  = "github-webhook-secret"
 )
 
 // Load reads github.yaml from the given filesystem and validates it.
@@ -1475,17 +1429,16 @@ func (o *Org) validateApps(login string) error {
 }
 
 // validateAppOwnership enforces the split between Apps we author (must
-// be prefixed, must have credentials) and vendor Apps (must not).
+// be prefixed — App display names are globally unique on GitHub) and
+// vendor Apps (inventory only, and they must already exist).
+//
+// Where an App we author keeps its key is deliberately NOT declared
+// here. The App is created and held by a credential custodian outside
+// this library; the registry describes the App's shape on GitHub, and a
+// row that also claimed to know where the key lives would be a second
+// copy of that fact, stale the first time a key moves.
 func validateAppOwnership(login, name, prefix string, app *App) error {
 	if app.External {
-		if app.Adopted {
-			return fmt.Errorf("org %q app %q: external and adopted are mutually exclusive", login, name)
-		}
-
-		if app.Credentials != nil {
-			return fmt.Errorf("org %q app %q: external Apps have no credentials of ours", login, name)
-		}
-
 		if app.AppID == 0 || app.InstallationID == 0 {
 			return fmt.Errorf("org %q app %q: external rows must record app_id and installation_id (they exist; we only inventory them)", login, name)
 		}
@@ -1495,33 +1448,6 @@ func validateAppOwnership(login, name, prefix string, app *App) error {
 
 	if !strings.HasPrefix(name, prefix) {
 		return fmt.Errorf("org %q app %q: our Apps must be prefixed %q — App display names are globally unique on GitHub", login, name, prefix)
-	}
-
-	if app.Adopted {
-		if app.AppID == 0 || app.InstallationID == 0 {
-			return fmt.Errorf("org %q app %q: adopted rows must record app_id and installation_id (the App already exists)", login, name)
-		}
-
-		if app.Note == "" {
-			return fmt.Errorf("org %q app %q: adopted rows need a note saying what still has to happen (credential normalization)", login, name)
-		}
-
-		return nil
-	}
-
-	if app.Credentials == nil {
-		return fmt.Errorf("org %q app %q: credentials (op_item + ssm_prefix) are required for Apps we author", login, name)
-	}
-
-	if app.Credentials.OpItem == "" {
-		return fmt.Errorf("org %q app %q: credentials.op_item is required", login, name)
-	}
-
-	// The mirror path's SHAPE (e.g. a "/secrets/" convention) is the
-	// consuming estate's rule, asserted in its own registry tests.
-
-	if app.URL == "" {
-		return fmt.Errorf("org %q app %q: url is required — the manifest flow needs a homepage URL", login, name)
 	}
 
 	return nil

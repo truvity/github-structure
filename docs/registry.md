@@ -68,9 +68,7 @@ orgs:
       <name>:
         external: true            # third-party: drift detection only
         permissions: {…}          # compared against live
-        credentials:
-          op_item: …              # source-of-truth item in your store
-          ssm_prefix: …           # optional machine mirror
+        install: all|selected     # and `repos:` when selected
     runner_groups: {…}
 ```
 

@@ -720,42 +720,41 @@ func TestAppOursNeedsPrefix(t *testing.T) {
         install: all
         permissions:
           metadata: read
-        credentials:
-          op_item: github-app-widgetbot
-          ssm_prefix: /creds/structure-engine/acme
 `)
 	_, err := load(t, body)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "prefixed")
 }
 
-func TestAppOursNeedsCredentials(t *testing.T) {
+// An App we author declares no credential location: where its key
+// lives is the custodian's business, and a second copy of that fact
+// here would be stale the first time a key moves.
+func TestAppOursNeedsNoCredentialRow(t *testing.T) {
 	body := withApps(`      acme-iac:
         url: https://example.com
         install: all
         permissions:
           metadata: read
 `)
-	_, err := load(t, body)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "credentials")
+	cfg, err := load(t, body)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.Orgs["acme"].Apps, "acme-iac")
 }
 
-func TestAppExternalRejectsCredentials(t *testing.T) {
-	body := withApps(`      vendorbot:
-        external: true
-        app_id: 42
-        installation_id: 43
+// And a row that still tries to say where the key lives is refused
+// outright rather than quietly ignored.
+func TestAppRejectsCredentialRow(t *testing.T) {
+	body := withApps(`      acme-iac:
+        url: https://example.com
         install: all
         permissions:
           metadata: read
         credentials:
-          op_item: nope
-          ssm_prefix: /creds/nope
+          op_item: github-app-acme-iac
 `)
 	_, err := load(t, body)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "external Apps have no credentials")
+	assert.Contains(t, err.Error(), "credentials")
 }
 
 func TestAppExternalNeedsIDs(t *testing.T) {
@@ -768,20 +767,6 @@ func TestAppExternalNeedsIDs(t *testing.T) {
 	_, err := load(t, body)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "app_id")
-}
-
-func TestAppAdoptedNeedsANote(t *testing.T) {
-	body := withApps(`      acme-legacy:
-        adopted: true
-        app_id: 42
-        installation_id: 43
-        install: all
-        permissions:
-          metadata: read
-`)
-	_, err := load(t, body)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "note")
 }
 
 func TestAppRejectsUnknownPermission(t *testing.T) {
@@ -834,9 +819,6 @@ func TestOwnedAppsExcludesVendors(t *testing.T) {
         install: all
         permissions:
           metadata: read
-        credentials:
-          op_item: github-app-acme-iac
-          ssm_prefix: /creds/structure-engine/acme
       vendorbot:
         external: true
         app_id: 42
