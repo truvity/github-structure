@@ -168,7 +168,31 @@ Provider spellings that cost a failed apply each:
   `actor_id: 0` — GitHub ignores the documented `1` on write and
   returns 0 on read, so any other spelling is a perpetual diff.
 
-## Entitlement scopes — derived, never hand-kept
+## Organization Actions variables and secrets
+
+Both are declared under `settings.actions`, and the split between them
+is one of custody:
+
+- a **variable**'s value is not a secret — runner labels, bucket names,
+  in-cluster URLs — so the registry holds it and
+  `ReconcileOrgVariables` writes it. Name, value, visibility and
+  membership are all owned here;
+- a **secret** is declared by NAME, visibility and scope only. Its value
+  is never read, written or known by this code: a registry that could
+  write one would first need somewhere to read it from, which is a key
+  custody problem it should not create. Put the source in a comment
+  beside the row, so the inventory says who to ask.
+
+Neither is a Pulumi resource. The structure engine authenticates as the
+structure App, and GitHub gates the org variables API behind the
+separate `organization_actions_variables` permission — which an App
+cannot be granted through any API, only a console edit plus an
+installation approval. Giving the engine the value while this
+reconciler keeps the membership would also put two writers with two
+identities on one object. `pkg/app/entitlements.go` carries the whole
+argument.
+
+### Entitlement scopes — derived, never hand-kept
 
 A `selected`-visibility org variable or secret carries a `scope`: a
 profile-wide rule plus explicit additions, resolved to the repo list at
@@ -182,13 +206,13 @@ settings:
         value: "123456"
         visibility: selected
         scope:
-          derive_profile: public   # every non-archived public-profile repo
+          derive_preset: public    # every non-archived repo on the `public` preset
           repos: [workstation]     # explicit additions beyond the rule
     secrets:
       RENOVATE_APP_PRIVATE_KEY:    # names + scope only — values NEVER live here
         visibility: selected
         scope:
-          derive_profile: public
+          derive_preset: public
 ```
 
 Why derived: a hand-kept list is the entitlement dead zone. Workflows on
@@ -199,12 +223,26 @@ exactly like a quiet day. Under a derived rule, new repos matching the
 profile are entitled at birth by the next reconcile, and every hand
 mutation surfaces as drift.
 
-The mechanics live in `pkg/app`: `ReconcileEntitlementScopes` (idempotent
-set-semantics PUTs — GitHub's selected-repositories endpoint replaces the
-whole list, so there is no delete window and no Pulumi import problem)
-and `CheckEntitlementScopes` (symmetric-difference drift). Secrets are
-declared by NAME and scope only; their values reach GitHub outside this
-registry.
+The mechanics live in `pkg/app`: `ReconcileOrgVariables` (create or
+correct a variable's value and visibility, sending the resolved
+membership with it so a PATCH is never a partial write),
+`ReconcileEntitlementScopes` (idempotent set-semantics PUTs — GitHub's
+selected-repositories endpoint replaces the whole list, so there is no
+delete window) and, for drift, `CheckOrgVariables` plus
+`CheckEntitlementScopes`.
+
+Three refusals are deliberate:
+
+- nothing here DELETES a variable or a secret. A live one that no row
+  declares is reported by `CheckOrgVariables` and a human decides —
+  removing something every CI job reads must not be reachable from an
+  editing slip;
+- creating a `selected` variable with no declared scope is an error, not
+  an empty list. A variable nobody may read makes its workflows *skip*,
+  which reads as a quiet day;
+- a declared subject that is not live is a FINDING, not a failed run.
+  Returning it as an error ended the drift run at its first stale row
+  and hid every finding behind it.
 
 Known third surface NOT yet covered: GitHub **App installation**
 repository lists. The API to read or edit another App's installation

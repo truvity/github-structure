@@ -258,14 +258,20 @@ func deployOrgActions(c *pulumi.Context, org string, orgCfg *registry.Org, provi
 			CanApprovePullRequestReviews: pulumi.Bool(a.CanApprovePullRequests),
 		}, pulumi.Provider(provider), pulumi.Import(pulumi.ID(org)))
 
-	// Actions VARIABLES are declared in the registry but not managed here.
-	// The provider (6.15.0) cannot import an ActionsOrganizationVariable —
-	// preview fails outright with "provider does not support importing
-	// resources" — and creating one that already exists is a 409. Handing
-	// them to Pulumi would mean deleting live variables first, which is a
-	// window with no CI. So they follow the SecurityConfigurations
-	// precedent: declared for humans, verified by `just github-drift`,
-	// enforced by nothing. See CheckOrgVariables.
+	// Actions VARIABLES and SECRETS are declared in the registry and
+	// enforced — but not here. app.ReconcileOrgVariables owns a
+	// variable's value, visibility and membership, and
+	// app.ReconcileEntitlementScopes owns a secret's membership; the
+	// file comment on pkg/app/entitlements.go carries the reasoning.
+	//
+	// The short version is custody. This stack authenticates as the
+	// structure App, and GitHub gates the org variables API behind the
+	// separate `organization_actions_variables` permission that App
+	// deliberately does not hold — so the engine cannot even LIST them,
+	// let alone adopt one. Granting it is a console edit plus an
+	// installation approval, and it would buy a SECOND writer on an
+	// object whose membership half is already reconciled elsewhere.
+	// One object, one writer.
 	return err
 }
 

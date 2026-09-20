@@ -298,14 +298,15 @@ func sortedMapKeys(m map[string]string) []string {
 // CheckOrgVariables compares the org's declared Actions variables against
 // live GitHub.
 //
-// Detection, not enforcement, and for a different reason than CheckApps:
-// there IS an API here, but the Pulumi provider (6.15.0) cannot import an
-// ActionsOrganizationVariable — a preview containing one fails with
-// "provider does not support importing resources" — and creating one that
-// already exists returns 409. Managing them would mean deleting the live
-// variables so Pulumi could recreate them, and every CI job in the org
-// reads them, so that window is an outage. Declared and checked is the
-// honest maximum until the provider grows import.
+// The DECLARED side of this is now enforced — ReconcileOrgVariables
+// writes any value or visibility that differs — so the findings this
+// check still has to itself are the ones no reconciler may act on:
+//
+//   - a variable that is LIVE and undeclared. Deleting it is not a thing
+//     a reconciler should do as a side effect of an editing slip, so it
+//     is reported and a human decides;
+//   - a declared variable the reconciler has not been run for yet, which
+//     is the drift check doing its actual job.
 //
 // Visibility is checked as strictly as the values, and defaults to
 // `private` when a row omits it. These name internal infrastructure —
@@ -317,8 +318,23 @@ func CheckOrgVariables(ctx context.Context, org string, cfg *registry.Org) ([]Dr
 		return nil, nil
 	}
 
-	want := cfg.Settings.Actions.Variables
+	live, err := liveOrgVariables(ctx, org)
+	if err != nil {
+		return nil, err
+	}
 
+	return compareOrgVariables(cfg.Settings.Actions.Variables, live), nil
+}
+
+// liveOrgVariables reads the org's Actions variables — the one fetch the
+// check and the reconciler share, so they can never disagree about what
+// "live" means.
+//
+// One page of 100 is deliberate rather than lazy: org variables are a
+// hand-curated set of infrastructure particulars, and an estate that
+// pushes past a hundred of them wants a rethink before it wants
+// pagination.
+func liveOrgVariables(ctx context.Context, org string) (map[string]liveVariable, error) {
 	var page struct {
 		Variables []struct {
 			Name       string `json:"name"`
@@ -336,7 +352,7 @@ func CheckOrgVariables(ctx context.Context, org string, cfg *registry.Org) ([]Dr
 		live[v.Name] = liveVariable{value: v.Value, visibility: v.Visibility}
 	}
 
-	return compareOrgVariables(want, live), nil
+	return live, nil
 }
 
 // compareOrgVariables is the comparison itself, separated from the fetch
