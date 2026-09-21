@@ -12,7 +12,8 @@ profiles:            # shared, top-level — the whole point
                             # optional field: omit it where the class's
                             # gate is still hand-spelled in `protection`.
     visibility: public|private
-    has_issues: …    # every settings field REQUIRED — no partial profiles
+    has_issues: …    # ONLY WHAT DIFFERS from GitHub's own new-repository
+                     # defaults — a preset is a diff (see below)
     actions: {allowed_actions: …, default_workflow_permissions: …, …}
     protection:
       enabled: true|false          # false = NO rule at all (a different
@@ -28,6 +29,9 @@ profiles:            # shared, top-level — the whole point
 
 orgs:
   <login>:
+    default_access: [bundle, …]   # bundles every repo here gets unless
+                                  # its row decides for itself; `access: []`
+                                  # on a row opts out
     engine_credentials:           # where YOUR estate keeps the engine
       ssm_prefix: …               # App's credentials for THIS org —
                                   # exactly one source. Either an
@@ -80,6 +84,65 @@ Sharp edges the schema enforces (each learned, not designed):
 - Fields GitHub owns in a given org state (e.g. `allow_forking` where
   the org forbids private forking) are excluded from writes —
   `repoIgnoredFields` in pkg/engine records each, with tests naming why.
+
+## A preset is a diff against GitHub's defaults
+
+A preset states what is true of YOUR estate. Anything it does not
+mention is GitHub's own answer for a new repository — private, `main`,
+all three merge buttons, no auto-merge, read-only workflow token, no
+branch protection rule.
+
+```yaml
+presets:
+  private:                       # ~10 lines, not 33
+    default_branch: master
+    allow_merge_commit: false
+    allow_auto_merge: true
+    delete_branch_on_merge: true
+    has_wiki: false
+    actions: {default_workflow_permissions: write}
+    protection: {enabled: true, required_checks: [check], enforce_admins: true}
+```
+
+**Every field is still applied.** Resolution is base → preset →
+overrides, and the resolved state sets all 33 — so nothing is left
+unmanaged, which is the property the old "state every field" rule
+existed to protect. What changed is only which of them a human writes
+down.
+
+**The base is a constant, not a lookup.** It is what GitHub creates a
+repository with, asserted in the library rather than fetched. If GitHub
+changes a default tomorrow, nothing your estate applies moves: the
+engine still sets every field from the resolved state, and the resolved
+state still comes from the table. Being wrong about an entry therefore
+costs a preset that reads as if it inherits one thing while inheriting
+another — visible in the resolved state — not a live setting that
+silently drifts.
+
+**One level only.** Base → preset. A preset cannot extend another
+preset: a chain is a thing you have to unwind in your head to know what
+a repository gets, and eleven presets taught that lesson once already.
+
+## `default_access` — an estate-wide grant, written once
+
+Where an organization grants the same teams on nearly every repository,
+`default_access` says it at the org and each row inherits it:
+
+```yaml
+orgs:
+  example:
+    default_access: [platform]
+    repos:
+      ordinary: {preset: private}                  # inherits [platform]
+      special:  {preset: private, access: [other]} # its own bundles
+      alone:    {preset: private, access: []}      # opts out, deliberately
+```
+
+Silence inherits; an **explicit empty list** opts out. The asymmetry is
+the feature — a row that means "no grants" has to say so, so it reads as
+a decision rather than a forgotten key. Inheritance is applied at load,
+so resolution, entitlements and drift all see one effective row, and the
+resolved state still shows every grant per repository.
 
 ## `review` — one field decides how a pull request becomes a merge
 

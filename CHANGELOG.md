@@ -6,6 +6,34 @@ taking a new one.
 
 ## Unreleased
 
+### Added
+
+- **A preset is a diff against GitHub's defaults.** A preset used to have
+  to state all 33 settings fields; it now states only what differs from
+  what GitHub creates a repository with. `private` goes from 33 lines to
+  about ten, and reads as what is true of the estate rather than as a
+  transcription.
+
+  The property the old rule protected is kept, and by the same means:
+  resolution is base → preset → overrides, so every field is still set
+  and still applied, and nothing is left unmanaged. The base is a
+  CONSTANT in the library, not a live lookup — if GitHub changes a
+  default, nothing an estate applies moves.
+
+  Existing presets are unaffected: a complete preset resolves exactly as
+  before. Nothing to do on upgrade.
+
+- **`default_access` on an organization.** The access bundles every
+  repository in that org gets unless its row decides for itself. For an
+  estate that grants the same teams nearly everywhere, this is one
+  decision instead of one copy per row.
+
+  Silence inherits; an explicit `access: []` on a row opts out. Applied
+  at load, so resolution, entitlements and drift see one effective row,
+  and the resolved state still shows every grant per repository. A
+  `default_access` naming an undeclared bundle fails the load even if no
+  row inherits it today.
+
 ### Changed
 
 - **BREAKING (registry schema).** The `apps:` block is gone, and
