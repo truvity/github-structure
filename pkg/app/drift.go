@@ -22,15 +22,15 @@ const (
 
 const (
 	// fieldRegistry / wantDeclared are the vocabulary for "the registry
-	// does not claim this thing", shared by the App, owner and repo
-	// checks so the three read identically in output.
+	// does not claim this thing", shared by the owner, repo and ruleset
+	// checks so they read identically in output.
 	fieldRegistry = "registry"
 	wantDeclared  = "declared in cfg/github.yaml"
 
 	// fieldExistence / fieldVisibility / gotAbsent are shared for the
-	// same reason: the App, variable, owner and repo checks all speak
-	// them, and one of them drifting to a synonym would split output a
-	// reader expects to be able to grep as a single vocabulary.
+	// same reason: the variable, owner, repo and ruleset checks all
+	// speak them, and one of them drifting to a synonym would split
+	// output a reader expects to be able to grep as a single vocabulary.
 	fieldExistence  = "existence"
 	fieldVisibility = "visibility"
 	gotAbsent       = "absent"
@@ -49,14 +49,6 @@ type (
 	liveVariable struct {
 		value      string
 		visibility string
-	}
-
-	installation struct {
-		ID                  int64             `json:"id"`
-		AppID               int64             `json:"app_id"`
-		AppSlug             string            `json:"app_slug"`
-		RepositorySelection string            `json:"repository_selection"`
-		Permissions         map[string]string `json:"permissions"`
 	}
 
 	// liveRepoSettings is what GitHub reports for one repository.
@@ -86,110 +78,6 @@ type (
 
 func (d Drift) String() string {
 	return fmt.Sprintf("%s: %s: registry=%q live=%q", d.Subject, d.Field, d.Want, d.Got)
-}
-
-// CheckApps compares every App row against its live installation.
-//
-// This is drift DETECTION, not enforcement, and deliberately so: editing
-// an existing App's permissions has no API at all (execution plan §4.1),
-// so the only honest thing IaC can do is notice and shout. A silent
-// permission widening on an App that can administer the org is exactly
-// the change worth noticing.
-func CheckApps(ctx context.Context, org string, cfg *registry.Org) ([]Drift, error) {
-	live, err := listInstallations(ctx, org)
-	if err != nil {
-		return nil, err
-	}
-
-	var drifts []Drift
-
-	byslug := make(map[string]installation, len(live))
-	for _, inst := range live {
-		byslug[inst.AppSlug] = inst
-	}
-
-	for _, name := range cfg.SortedApps() {
-		app := cfg.Apps[name]
-
-		inst, installed := byslug[name]
-		if !installed {
-			// A row without an app_id has simply not been created yet —
-			// that is a to-do, not drift.
-			if app.AppID != 0 {
-				drifts = append(drifts, Drift{Subject: "app " + name, Field: "installation", Want: "installed", Got: gotAbsent})
-			}
-
-			continue
-		}
-
-		drifts = append(drifts, compareApp(name, app, inst)...)
-	}
-
-	for slug := range byslug {
-		if _, known := cfg.Apps[slug]; !known {
-			drifts = append(drifts, Drift{
-				Subject: "app " + slug,
-				Field:   fieldRegistry,
-				Want:    wantDeclared,
-				Got:     "installed but unknown",
-			})
-		}
-	}
-
-	sort.Slice(drifts, func(i, j int) bool {
-		if drifts[i].Subject != drifts[j].Subject {
-			return drifts[i].Subject < drifts[j].Subject
-		}
-
-		return drifts[i].Field < drifts[j].Field
-	})
-
-	return drifts, nil
-}
-
-func compareApp(name string, app *registry.App, inst installation) []Drift {
-	var drifts []Drift
-
-	subject := "app " + name
-
-	if app.AppID != 0 && app.AppID != inst.AppID {
-		drifts = append(drifts, Drift{subject, "app_id", fmt.Sprint(app.AppID), fmt.Sprint(inst.AppID)})
-	}
-
-	if app.InstallationID != 0 && app.InstallationID != inst.ID {
-		drifts = append(drifts, Drift{subject, "installation_id", fmt.Sprint(app.InstallationID), fmt.Sprint(inst.ID)})
-	}
-
-	if app.Install != inst.RepositorySelection {
-		drifts = append(drifts, Drift{subject, "install", app.Install, inst.RepositorySelection})
-	}
-
-	for _, perm := range sortedMapKeys(app.Permissions) {
-		want := app.Permissions[perm]
-		if got := inst.Permissions[perm]; got != want {
-			drifts = append(drifts, Drift{subject, "permission " + perm, want, got})
-		}
-	}
-
-	for _, perm := range sortedMapKeys(inst.Permissions) {
-		if _, declared := app.Permissions[perm]; !declared {
-			drifts = append(drifts, Drift{subject, "permission " + perm, "", inst.Permissions[perm]})
-		}
-	}
-
-	return drifts
-}
-
-func listInstallations(ctx context.Context, org string) ([]installation, error) {
-	var page struct {
-		Installations []installation `json:"installations"`
-	}
-
-	if err := ghAPI(ctx, fmt.Sprintf("/orgs/%s/installations?per_page=100", org), &page); err != nil {
-		return nil, err
-	}
-
-	return page.Installations, nil
 }
 
 // API performs a read-only GitHub API call with the operator's own gh
@@ -282,17 +170,6 @@ func ghAPI(ctx context.Context, path string, dst any) error {
 	}
 
 	return json.Unmarshal(stdout.Bytes(), dst)
-}
-
-func sortedMapKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-
-	sort.Strings(keys)
-
-	return keys
 }
 
 // CheckOrgVariables compares the org's declared Actions variables against
@@ -593,7 +470,7 @@ func compareOrgOwners(want, live []string) []Drift {
 // follow. So the repository kept the false it was created with, Renovate
 // kept asking GitHub to arm auto-merge, GitHub kept refusing, and
 // gemaal#39 sat green and unmerged while `just github-drift` reported
-// everything matching — because drift covered Apps, variables and owners
+// everything matching — because drift covered variables and owners
 // and simply did not look at repository settings.
 //
 // Branch protection is NOT compared here. It is a separate resource with
@@ -625,8 +502,8 @@ func CheckRepoSettings(ctx context.Context, org string, registry *registry.Confi
 
 		if err := ghAPI(ctx, "/repos/"+org+"/"+name, &live); err != nil {
 			// A declared repository that does not exist is a to-do, not
-			// a failed check — the same reading CheckApps gives a row
-			// whose App was never created.
+			// a failed check: the row is ahead of the estate, which is
+			// how a repository gets created in the first place.
 			if errors.Is(err, ErrNotFound) {
 				drifts = append(drifts, Drift{
 					Subject: "repo " + name,

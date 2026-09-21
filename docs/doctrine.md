@@ -8,10 +8,14 @@ new code. Everything below follows from four rules.
 ## 1. One row per thing; adding is a row, never code
 
 The registry is DESIRED STATE for everything the engine can apply, and
-INVENTORY for everything it cannot (GitHub has no API for App creation,
-installation, or permission approval — those rows exist so drift checks
-and humans can see them). If adding a repository to your estate requires
-touching Go, the abstraction has failed.
+INVENTORY for the few things it cannot (an org's code security
+configurations, say — the provider has no resource for them, but "who
+owns Dependabot alerts" is still worth answering). It is NOT a copy of
+facts GitHub already holds: a ruleset names a bypass App, and the id is
+read from the live installation list, because a copied id is stale the
+moment the App is recreated and says nothing when it is. If adding a
+repository to your estate requires touching Go, the abstraction has
+failed.
 
 ## 2. Profiles set every field; overrides carry reasons
 
@@ -69,7 +73,7 @@ source estate sat unmergeable that way on one afternoon.
 ## 4. Structure and membership are different planes
 
 This engine owns STRUCTURE: orgs, teams (existence, nesting, privacy),
-repositories and their settings, protection, Apps, runner groups. Team
+repositories and their settings, protection, runner groups. Team
 MEMBERSHIP deliberately never appears in the registry — membership is
 liveness-shaped data owned by whatever system tracks people (an IdP
 join, an HR-driven roster). The same split shows in owners: the engine

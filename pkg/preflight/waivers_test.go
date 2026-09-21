@@ -53,7 +53,6 @@ access:
     management: pull
 orgs:
   acme:
-    app_prefix: acme-
     engine_credentials:
       ssm_prefix: /creds/structure-engine/acme
     settings:
@@ -84,7 +83,6 @@ orgs:
     teams:
       management:
         privacy: closed
-    apps: {}
     repos:
       widget:
         preset: public

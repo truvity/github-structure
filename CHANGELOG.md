@@ -8,6 +8,40 @@ taking a new one.
 
 ### Changed
 
+- **BREAKING (registry schema).** The `apps:` block is gone, and
+  `app_prefix:` with it. A ruleset's `bypass_apps` still takes App
+  names — now the App's **slug**, resolved against the Apps INSTALLED
+  on the organization (`GET /orgs/{org}/installations`) when the engine
+  deploys, instead of against a row in this file.
+
+  Why: the block's one load-bearing job was turning a name into a
+  database id, and the id is GitHub's fact about an App, not the
+  registry's. Held in a file it was hand-copied, unreadable at the
+  point of use, and stale the moment an App was recreated. The rest of
+  the block was inventory: an App's existence, its key, its
+  installation and its permissions belong to whoever holds that key,
+  and a second description of them here could only disagree.
+
+  Migrating: delete `apps:` and `app_prefix:` from every org. Leave
+  every `bypass_apps:` list exactly as it is — the names already match
+  the App slugs, and nothing a ruleset renders changes. A file that
+  still carries either key **fails to load**, naming the org: a retired
+  block that loaded silently would read as "still managed here".
+
+  The engine App needs `organization_administration: read` on any
+  organization whose rulesets name a bypass App. It is asked for
+  nowhere else — an estate whose rules name none never needs it.
+
+  Go callers: `Org.BypassAppIDs` becomes
+  `registry.InstalledApps.BypassAppIDs` (`InstalledApps` is
+  `map[slug]id`). `app.InstalledAppIDs(ctx, client, org)` reads that
+  map as the App; `CheckBypassSurfaces` reads it through `gh` for
+  itself. Removed: `registry.App`, `Org.Apps`, `Org.AppPrefix`,
+  `Org.SortedApps`, `Org.OwnedApps`, `Config.AppPrefixFor`,
+  `registry.InstallAll`/`InstallSelected`, and `app.CheckApps` (App
+  rows to compare against no longer exist — the other drift checks are
+  unchanged).
+
 - **BREAKING (registry schema).** `bypass_apps`, on both
   `tag_rulesets` and `branch_rulesets`, now takes GitHub App **names**
   — keys of the same organization's `apps` map — instead of App
@@ -28,13 +62,17 @@ taking a new one.
   field that takes both keeps the habit alive. A numeric entry is
   rejected with a message saying so.
 
-  Go callers: `Org.BypassAppIDs(names []string) ([]int, error)` is the
-  resolver. `deployTagRulesets`, `deployBranchRulesets` and the drift
-  check now take the `*registry.Org` they resolve against.
+  Go callers: see the entry above — the resolver moved from
+  `Org.BypassAppIDs` to `registry.InstalledApps.BypassAppIDs` in the
+  same release, and `apps` rows are no longer where a name resolves.
 
 ### Added
 
-- An unresolvable bypass App name is a **load error** naming the
-  organization, repository and ruleset. It was previously impossible to
-  express, and its absence is what let a bypass list drift out of date
-  in silence.
+- A bypass App name that does not resolve is refused, never dropped.
+  The spelling half runs at **load**: an all-digits name is rejected as
+  the field's old id spelling. The existence half runs at **deploy**,
+  where live GitHub can answer it — a name with no installation on the
+  organization stops the deploy and names the App. Neither was
+  expressible before, and their absence is what let a bypass list drift
+  out of date in silence: the gate stays, the actor goes, and nothing
+  says so until the release act it permits is refused.

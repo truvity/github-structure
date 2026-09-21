@@ -57,6 +57,15 @@ func CheckBypassSurfaces(ctx context.Context, org string, cfg *registry.Config) 
 		return nil, nil
 	}
 
+	// The same list the engine resolves against at deploy, read once for
+	// the whole org. Reading it here rather than per repo also means the
+	// check and the deploy can only disagree if GitHub itself changed
+	// between them.
+	installed, err := installedAppIDs(ctx, org)
+	if err != nil {
+		return nil, err
+	}
+
 	teamIDs := map[string]int64{}
 
 	var drifts []Drift
@@ -79,7 +88,7 @@ func CheckBypassSurfaces(ctx context.Context, org string, cfg *registry.Config) 
 
 		drifts = append(drifts, d...)
 
-		d, err = checkRulesetActors(ctx, org, orgCfg, name, repo, teamIDs)
+		d, err = checkRulesetActors(ctx, org, name, repo, installed, teamIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -130,9 +139,9 @@ func checkReviewBypasses(ctx context.Context, org, name string, want registry.Re
 func checkRulesetActors(
 	ctx context.Context,
 	org string,
-	orgCfg *registry.Org,
 	name string,
 	repo *registry.Repo,
+	installed registry.InstalledApps,
 	teamIDs map[string]int64,
 ) ([]Drift, error) {
 	// Declared expectation per ruleset name.
@@ -143,7 +152,7 @@ func checkRulesetActors(
 		// ids. Resolve before comparing, and REFUSE on a name that does
 		// not resolve — reporting "the live App is undeclared" would
 		// invite someone to delete the actor that makes releases work.
-		appIDs, err := orgCfg.BypassAppIDs(rs.BypassApps)
+		appIDs, err := installed.BypassAppIDs(rs.BypassApps)
 		if err != nil {
 			return nil, fmt.Errorf("repo %s tag ruleset %s: %w", name, rs.Name, err)
 		}
@@ -152,7 +161,7 @@ func checkRulesetActors(
 	}
 
 	for _, rs := range repo.BranchRulesets {
-		appIDs, err := orgCfg.BypassAppIDs(rs.BypassApps)
+		appIDs, err := installed.BypassAppIDs(rs.BypassApps)
 		if err != nil {
 			return nil, fmt.Errorf("repo %s branch ruleset %s: %w", name, rs.Name, err)
 		}

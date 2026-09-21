@@ -24,9 +24,11 @@ KV v2 secret. It is per-org, so orgs can sit in different stores while
 an estate moves between them.
 
 App permissions the engine needs: Administration (org+repo, RW),
-Members (RW), Actions/Workflows metadata (R), plus whatever your drift
-checks probe. Keep one App per organization: display names are globally
-unique, so prefix them (`app_prefix`, default `{org}-`).
+Members (RW), Actions/Workflows metadata (R), Organization
+administration (R, only where a ruleset names a bypass App — that is
+how the slug becomes an id), plus whatever your drift checks probe.
+Keep one App per organization: App display names are globally unique on
+GitHub, so give yours a per-org prefix of your own.
 
 ## 1. Snapshot, then declare exactly what is live
 

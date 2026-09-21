@@ -1,14 +1,15 @@
 // Package registry loads and validates the GitHub plane registry — one
 // YAML file (github.yaml at the root of the fs.FS handed to Load)
 // describing every org the structure engine owns: org settings, teams,
-// repos (a settings profile plus per-repo overrides with reasons), the
-// GitHub Apps the org depends on, and the Actions runner groups ARC
-// registers scale sets against.
+// repos (a settings profile plus per-repo overrides with reasons), and
+// the Actions runner groups ARC registers scale sets against.
 //
 // The registry is DESIRED STATE for everything Pulumi can apply and
-// INVENTORY for everything it cannot (App creation, App installation and
-// App permission edits have no API — see docs/operations/github-apps-day1.md).
-// Rows marked external are third-party Apps: drift detection only.
+// INVENTORY for the few things it cannot. GitHub Apps are neither: an
+// App's existence, its key and its installation belong to whoever holds
+// that key, so the registry names an App where a rule references one
+// (ruleset bypass actors) and resolves the name against the
+// organization's LIVE installations at deploy — see InstalledApps.
 //
 // Company-agnosticism is the design constraint. Profiles are top-level
 // and shared, so a second org (INF-473, the TP migration) is a new
@@ -21,6 +22,8 @@ import (
 	"io/fs"
 	"regexp"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // Team permission levels, in ascending order of power. These are the
@@ -84,12 +87,6 @@ const (
 	WorkflowPermissionWrit = "write"
 )
 
-// App installation scope values.
-const (
-	InstallAll      = "all"
-	InstallSelected = "selected"
-)
-
 // Runner-group visibility values.
 const (
 	RunnerVisibilityAll      = "all"
@@ -130,40 +127,8 @@ var (
 		WorkflowPermissionRead: true, WorkflowPermissionWrit: true,
 	}
 
-	validInstallScope = map[string]bool{
-		InstallAll: true, InstallSelected: true,
-	}
-
 	validRunnerVisibility = map[string]bool{
 		RunnerVisibilityAll: true, RunnerVisibilitySelected: true, RunnerVisibilityPrivate: true,
-	}
-
-	// validAppPermissions is the GitHub App permission vocabulary we use.
-	// Org-level keys carry the organization_ prefix (plus `members`),
-	// exactly as GET /orgs/{org}/installations reports them — so a drift
-	// check is a literal map comparison, no translation layer.
-	validAppPermissions = map[string]bool{
-		// repository-level
-		"actions": true, "administration": true, "checks": true,
-		"contents": true, "deployments": true, "discussions": true,
-		"environments": true, "issues": true, "merge_queues": true,
-		"metadata": true, "packages": true, "pages": true,
-		"pull_requests": true, "repository_hooks": true,
-		"repository_projects": true, "secret_scanning_alerts": true,
-		"secrets": true, "security_events": true, "statuses": true,
-		"vulnerability_alerts": true, "workflows": true,
-		// organization-level
-		"members": true, "organization_administration": true,
-		"organization_custom_properties": true, "organization_custom_roles": true,
-		"organization_events": true, "organization_hooks": true,
-		"organization_packages": true, "organization_plan": true,
-		"organization_projects": true, "organization_secrets": true,
-		"organization_self_hosted_runners": true, "organization_user_blocking": true,
-		"team_discussions": true,
-	}
-
-	validAppPermissionLevels = map[string]bool{
-		"read": true, "write": true, "admin": true,
 	}
 )
 
@@ -192,10 +157,6 @@ type (
 		// Company links this org to a cfg/companies.yaml row. Truvity is
 		// the incumbent and has no code there; other orgs must name one.
 		Company string `yaml:"company,omitempty"`
-		// AppPrefix is the mandatory name prefix for Apps we author in
-		// this org — App display names are globally unique on GitHub.
-		// Defaults to "{org}-".
-		AppPrefix string `yaml:"app_prefix,omitempty"`
 		// EngineCredentials says WHERE the credentials of the App this
 		// engine acts as, for this org, are kept — the caller reads
 		// them from there and hands engine.Credentials to Deploy. It is
@@ -230,16 +191,13 @@ type (
 		Teams map[string]*Team `yaml:"teams"`
 		// Repos are the in-scope repositories, keyed by name.
 		Repos map[string]*Repo `yaml:"repos"`
-		// Apps are the GitHub Apps the org depends on.
-		Apps map[string]*App `yaml:"apps"`
 		// RunnerGroups are the Actions runner groups ARC targets.
 		RunnerGroups map[string]*RunnerGroup `yaml:"runner_groups,omitempty"`
 		// SecurityConfigurations is INVENTORY, never desired state: the
 		// provider has no resource for code security configurations, and
 		// an enforced one makes GitHub reject per-repository writes to
 		// the settings it covers. Recorded so the registry still answers
-		// "who owns Dependabot alerts" — the same role the `external`
-		// App rows play. See
+		// "who owns Dependabot alerts". See
 		// docs/operations/github-security-configurations.md.
 		SecurityConfigurations map[string]*SecurityConfiguration `yaml:"security_configurations,omitempty"`
 	}
@@ -479,16 +437,17 @@ type (
 		// specific App direct-push without CI (the Kargo promotion
 		// writer, gitops). Leave empty to require no checks.
 		RequiredChecks []string `yaml:"required_checks,omitempty"`
-		// BypassApps are the names of Apps allowed to bypass — how
-		// renovate automerges its green PRs. Each name is a key in the
-		// SAME org's `apps` map, and Org.BypassAppIDs turns it into the
-		// GitHub App database id the REST API wants.
+		// BypassApps are the slugs of Apps allowed to bypass — how an
+		// automation merges its own green PRs. Each name is resolved
+		// against the Apps INSTALLED on the same org, by
+		// InstalledApps.BypassAppIDs, into the GitHub App database id
+		// the REST API wants.
 		//
-		// Names, not ids, because an id is a fact about an App that the
-		// registry already records once, in the App's own row. Written
-		// out a second time here it is hand-copied, unreadable, and stale
-		// the moment an App is recreated — and a stale bypass does not
-		// announce itself, it refuses one release act.
+		// Names, not ids, because an id is GitHub's fact about an App,
+		// not the registry's. Written out here it is hand-copied,
+		// unreadable, and stale the moment an App is recreated — and a
+		// stale bypass does not announce itself, it refuses one release
+		// act.
 		BypassApps []string `yaml:"bypass_apps"`
 		// BypassOrgAdmins lets organization admins merge without the
 		// review. Rulesets, unlike classic protection, do NOT exempt
@@ -511,14 +470,14 @@ type (
 		// nobody can bypass makes the tag namespace permanently
 		// unwritable, which is a bricked release path, not protection.
 		BypassTeams []string `yaml:"bypass_teams"`
-		// BypassApps are the names of Apps allowed the same tag acts as
+		// BypassApps are the slugs of Apps allowed the same tag acts as
 		// Integration actors — how a scheduled auto-release cuts its tag
 		// without a human in the release team. Additive to BypassTeams,
 		// which stays required: an App key can rotate away, a team
 		// cannot.
 		//
-		// Same vocabulary as the branch ruleset's field: a key in this
-		// org's `apps` map, resolved by Org.BypassAppIDs.
+		// Same vocabulary as the branch ruleset's field: an App slug,
+		// resolved against the org's live installations.
 		BypassApps []string `yaml:"bypass_apps,omitempty"`
 		// BypassOrgAdmins additionally lets org admins act on matching
 		// tags — the audit-visible break-glass, same semantics as the
@@ -600,39 +559,6 @@ type (
 		AllowDeletions          *bool     `yaml:"allow_deletions,omitempty"`
 	}
 
-	// App is one GitHub App the org depends on.
-	App struct {
-		// External marks a vendor App: inventory + drift detection only.
-		// We never create, install or edit those.
-		External bool `yaml:"external,omitempty"`
-		// Description is the App blurb, as GitHub shows it.
-		Description string `yaml:"description,omitempty"`
-		// URL is the App's homepage.
-		URL string `yaml:"url,omitempty"`
-		// AppID and InstallationID are recorded once known. Optional —
-		// drift detection keys on the App slug, so a freshly registered
-		// row works before its first creation.
-		AppID          int64 `yaml:"app_id,omitempty"`
-		InstallationID int64 `yaml:"installation_id,omitempty"`
-		// Install is the installation's repository scope.
-		Install string `yaml:"install"`
-		// Repos scopes a `selected` installation. Empty means "not read
-		// yet" — there is no REST endpoint to read another App's scope
-		// with a user token (snapshot §4.3).
-		Repos []string `yaml:"repos,omitempty"`
-		// Permissions is the App's permission set, keyed exactly as
-		// GET /orgs/{org}/installations reports it.
-		Permissions map[string]string `yaml:"permissions"`
-		// Events are the webhook events the App subscribes to.
-		Events []string `yaml:"events,omitempty"`
-		// WebhookURL is where GitHub delivers events. Empty means the
-		// App is API-only.
-		WebhookURL string `yaml:"webhook_url,omitempty"`
-		// Note carries context a future reader needs (why it exists, what
-		// replaced it, which ticket retires it).
-		Note string `yaml:"note,omitempty"`
-	}
-
 	// EngineCredentials is one org's engine-App credential source:
 	// EXACTLY ONE of the fields below. Only the LOCATION is declared —
 	// what the three credential values are called inside it is the
@@ -671,6 +597,18 @@ type (
 	}
 )
 
+// InstalledApps is one organization's App installations, as slug → App
+// database id: the answer GET /orgs/{org}/installations gives.
+//
+// It is the registry's only App vocabulary. The library used to carry an
+// `apps:` inventory whose load-bearing job was turning a ruleset's App
+// NAME into the database id the REST API wants — an id hand-copied into
+// a file, stale the moment an App was recreated, and stale silently.
+// Live GitHub knows the same fact and cannot be out of date about it, so
+// the caller reads it there (pkg/app does, both as the engine App and
+// through the operator's CLI) and hands it to BypassAppIDs.
+type InstalledApps map[string]int
+
 // The field-name convention an SSM-shaped engine credential follows:
 // one parameter per name under EngineCredentials.SSMPrefix. Nothing here
 // creates or writes those parameters — whoever holds the App key does
@@ -685,6 +623,20 @@ const (
 func Load(fsys fs.FS) (*Config, error) {
 	var c Config
 	if err := load(fsys, "github.yaml", &c); err != nil {
+		// The loader is strict, so a retired key fails here as an
+		// anonymous "field not found in type". A reader who wrote
+		// `apps:` needs the forwarding address, not the decoder's
+		// vocabulary — so say where Apps went before handing the raw
+		// error back.
+		if orgs := orgsDeclaringApps(fsys); len(orgs) > 0 {
+			return nil, fmt.Errorf("github.yaml: org %s: the App vocabulary (`apps:`, `app_prefix:`)"+
+				" is no longer part of the registry. An App's existence, its key and its"+
+				" installation belong to the credential custodian's catalogue; a ruleset's"+
+				" bypass_apps names the App, and the id is resolved from the organization's"+
+				" LIVE installations at deploy. Delete the block: %w",
+				strings.Join(orgs, ", "), err)
+		}
+
 		return nil, err
 	}
 
@@ -693,6 +645,39 @@ func Load(fsys fs.FS) (*Config, error) {
 	}
 
 	return &c, nil
+}
+
+// orgsDeclaringApps re-reads the file leniently to name the orgs that
+// still carry the retired App vocabulary. Only ever called once a strict
+// decode has already failed, so the second parse costs nothing in the
+// normal case — and an unreadable or unparseable file simply yields no
+// names, leaving the original error to speak.
+func orgsDeclaringApps(fsys fs.FS) []string {
+	data, err := fs.ReadFile(fsys, "github.yaml")
+	if err != nil {
+		return nil
+	}
+
+	var probe struct {
+		Orgs map[string]struct {
+			Apps      map[string]any `yaml:"apps"`
+			AppPrefix string         `yaml:"app_prefix"`
+		} `yaml:"orgs"`
+	}
+
+	if err := yaml.Unmarshal(data, &probe); err != nil {
+		return nil
+	}
+
+	var orgs []string
+
+	for _, login := range sortedKeys(probe.Orgs) {
+		if org := probe.Orgs[login]; org.Apps != nil || org.AppPrefix != "" {
+			orgs = append(orgs, login)
+		}
+	}
+
+	return orgs
 }
 
 // Validate enforces every registry invariant.
@@ -959,10 +944,6 @@ func (c *Config) validateOrg(login string, org *Org) error {
 		return err
 	}
 
-	if err := org.validateApps(login); err != nil {
-		return err
-	}
-
 	return org.validateRunnerGroups(login)
 }
 
@@ -1095,7 +1076,7 @@ func (c *Config) validateRepos(login string, org *Org) error {
 			return err
 		}
 
-		if err := validateBranchRulesets(login, name, org, repo); err != nil {
+		if err := validateBranchRulesets(login, name, repo); err != nil {
 			return err
 		}
 
@@ -1266,7 +1247,11 @@ func validateTagRulesets(login, name string, org *Org, repo *Repo) error {
 			}
 		}
 
-		if _, err := org.BypassAppIDs(rs.BypassApps); err != nil {
+		// Only the SPELLING is checkable here. Whether the App is
+		// installed is a question for live GitHub, and the load path has
+		// no credentials — so the existence half runs at deploy, where
+		// the answer is authoritative rather than a copy of it.
+		if err := refuseAppIDSpellings(rs.BypassApps); err != nil {
 			return fmt.Errorf("org %q repo %q: tag ruleset %q: %w", login, name, rs.Name, err)
 		}
 	}
@@ -1277,7 +1262,7 @@ func validateTagRulesets(login, name string, org *Org, repo *Repo) error {
 // validateBranchRulesets checks one repo's branch_rulesets rows: named,
 // enforcing something, and bypassable — without a bypass the gate
 // belongs in classic protection (see the BranchRuleset field comment).
-func validateBranchRulesets(login, name string, org *Org, repo *Repo) error {
+func validateBranchRulesets(login, name string, repo *Repo) error {
 	for i, rs := range repo.BranchRulesets {
 		switch {
 		case rs == nil || rs.Name == "":
@@ -1292,7 +1277,8 @@ func validateBranchRulesets(login, name string, org *Org, repo *Repo) error {
 				" or bypass_org_admins) — without one this belongs in classic protection", login, name, rs.Name)
 		}
 
-		if _, err := org.BypassAppIDs(rs.BypassApps); err != nil {
+		// See validateTagRulesets: spelling at load, existence at deploy.
+		if err := refuseAppIDSpellings(rs.BypassApps); err != nil {
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: %w", login, name, rs.Name, err)
 		}
 	}
@@ -1303,21 +1289,17 @@ func validateBranchRulesets(login, name string, org *Org, repo *Repo) error {
 // BypassAppIDs resolves ruleset bypass App names to the GitHub App
 // DATABASE ids the REST API takes as Integration bypass actors.
 //
-// The registry already states every id once, in the App's own row, so a
-// ruleset names the App and this reads the id back out. No API call is
-// involved: a bypass actor is decided by the file, the way every other
-// reference in it is.
-//
-// Org-scoped on purpose — the receiver IS the scope. A ruleset on a
-// repository in one organization can only name an App that organization
-// declares; an App row in a sibling org is not in `o.Apps` and so does
-// not resolve, which is the correct answer rather than a near miss.
+// The receiver IS the scope: one organization's live installations.
+// A ruleset on a repository in that organization can only name an App
+// installed on it, which is the same question GitHub asks when the
+// actor is written — so a name that resolves here is an actor that
+// works, and a name that does not is a deploy that stops.
 //
 // An unknown name is an ERROR and never an empty slice. Silently
 // dropping an unresolvable bypass actor is precisely the failure this
 // vocabulary exists to prevent: the ruleset stays, the actor does not,
 // and nothing says so until a release act is refused.
-func (o *Org) BypassAppIDs(names []string) ([]int, error) {
+func (installed InstalledApps) BypassAppIDs(names []string) ([]int, error) {
 	if len(names) == 0 {
 		return nil, nil
 	}
@@ -1325,30 +1307,51 @@ func (o *Org) BypassAppIDs(names []string) ([]int, error) {
 	ids := make([]int, 0, len(names))
 
 	for _, appName := range names {
-		// YAML happily reads a bare 4597170 as the string "4597170", so
-		// the old spelling would otherwise arrive here as a name that
-		// merely fails to resolve. Say what actually changed instead.
-		if isAllDigits(appName) {
-			return nil, fmt.Errorf("bypass app %q looks like a GitHub App database id:"+
-				" this field takes App NAMES (keys of this org's apps), and the id is read"+
-				" from the App's own row", appName)
+		if err := refuseAppIDSpelling(appName); err != nil {
+			return nil, err
 		}
 
-		app, ok := o.Apps[appName]
+		id, ok := installed[appName]
 		if !ok {
-			return nil, fmt.Errorf("bypass app %q is not declared in this org's apps —"+
-				" a bypass actor that does not resolve would be dropped, not defaulted", appName)
+			return nil, fmt.Errorf("bypass app %q is not installed on this organization —"+
+				" a bypass actor that does not resolve would be dropped, not defaulted."+
+				" Install the App on the org (this field takes the App's slug), or drop the name", appName)
 		}
 
-		if app.AppID == 0 {
-			return nil, fmt.Errorf("bypass app %q has no app_id, so it cannot be a bypass actor —"+
-				" record the id on the App row (it exists the moment the App does)", appName)
-		}
-
-		ids = append(ids, int(app.AppID))
+		ids = append(ids, id)
 	}
 
 	return ids, nil
+}
+
+// refuseAppIDSpelling rejects the database-id spelling this field used
+// to take. YAML happily reads a bare 4597170 as the string "4597170",
+// so without this the old spelling arrives as a name that merely fails
+// to resolve — and the reader is told the App is not installed when
+// what actually changed is the field's vocabulary.
+//
+// This is the half of the check that needs no network, so it runs at
+// LOAD as well as at deploy: a file that still spells ids is wrong
+// before anyone authenticates to anything.
+func refuseAppIDSpelling(appName string) error {
+	if isAllDigits(appName) {
+		return fmt.Errorf("bypass app %q looks like a GitHub App database id:"+
+			" this field takes App NAMES (the App's slug on GitHub), and the id is"+
+			" resolved from the organization's live installations", appName)
+	}
+
+	return nil
+}
+
+// refuseAppIDSpellings applies refuseAppIDSpelling to a whole list.
+func refuseAppIDSpellings(names []string) error {
+	for _, appName := range names {
+		if err := refuseAppIDSpelling(appName); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // isAllDigits reports whether s is a non-empty run of ASCII digits —
@@ -1382,77 +1385,6 @@ func protectionEnforcesAnything(p ResolvedProtection) bool {
 		p.RequireSignatures
 }
 
-func (o *Org) validateApps(login string) error {
-	prefix := o.appPrefix(login)
-
-	for _, name := range o.SortedApps() {
-		app := o.Apps[name]
-
-		if !slugPattern.MatchString(name) {
-			return fmt.Errorf("org %q app %q: invalid name", login, name)
-		}
-
-		if app == nil {
-			return fmt.Errorf("org %q app %q: empty row", login, name)
-		}
-
-		if !validInstallScope[app.Install] {
-			return fmt.Errorf("org %q app %q: install %q must be all or selected", login, name, app.Install)
-		}
-
-		if app.Install == InstallAll && len(app.Repos) > 0 {
-			return fmt.Errorf("org %q app %q: install: all cannot list repos", login, name)
-		}
-
-		for _, repo := range app.Repos {
-			if _, ok := o.Repos[repo]; !ok {
-				return fmt.Errorf("org %q app %q: scoped to repo %q, which is not an in-scope row", login, name, repo)
-			}
-		}
-
-		for perm, level := range app.Permissions {
-			if !validAppPermissions[perm] {
-				return fmt.Errorf("org %q app %q: unknown permission %q", login, name, perm)
-			}
-
-			if !validAppPermissionLevels[level] {
-				return fmt.Errorf("org %q app %q: permission %q level %q must be read, write or admin", login, name, perm, level)
-			}
-		}
-
-		if err := validateAppOwnership(login, name, prefix, app); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// validateAppOwnership enforces the split between Apps we author (must
-// be prefixed — App display names are globally unique on GitHub) and
-// vendor Apps (inventory only, and they must already exist).
-//
-// Where an App we author keeps its key is deliberately NOT declared
-// here. The App is created and held by a credential custodian outside
-// this library; the registry describes the App's shape on GitHub, and a
-// row that also claimed to know where the key lives would be a second
-// copy of that fact, stale the first time a key moves.
-func validateAppOwnership(login, name, prefix string, app *App) error {
-	if app.External {
-		if app.AppID == 0 || app.InstallationID == 0 {
-			return fmt.Errorf("org %q app %q: external rows must record app_id and installation_id (they exist; we only inventory them)", login, name)
-		}
-
-		return nil
-	}
-
-	if !strings.HasPrefix(name, prefix) {
-		return fmt.Errorf("org %q app %q: our Apps must be prefixed %q — App display names are globally unique on GitHub", login, name, prefix)
-	}
-
-	return nil
-}
-
 func (o *Org) validateRunnerGroups(login string) error {
 	for _, name := range sortedKeys(o.RunnerGroups) {
 		group := o.RunnerGroups[name]
@@ -1481,23 +1413,4 @@ func (o *Org) validateRunnerGroups(login string) error {
 	}
 
 	return nil
-}
-
-// appPrefix returns the mandatory prefix for Apps we author in this org.
-func (o *Org) appPrefix(login string) string {
-	if o.AppPrefix != "" {
-		return o.AppPrefix
-	}
-
-	return login + "-"
-}
-
-// AppPrefixFor returns the App name prefix for the named org.
-func (c *Config) AppPrefixFor(login string) string {
-	org, ok := c.Orgs[login]
-	if !ok {
-		return login + "-"
-	}
-
-	return org.appPrefix(login)
 }

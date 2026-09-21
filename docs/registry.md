@@ -40,7 +40,6 @@ orgs:
                                   # The property/parameter NAMES inside
                                   # are your estate's convention; the
                                   # library declares the place only.
-    app_prefix: "{org}-"          # display names are globally unique
     settings: {…}                 # org-level toggles
     owners: [login, …]            # asserted (promote-only) + drift-checked
     teams:
@@ -62,13 +61,8 @@ orgs:
           protection: {…}
         tag_rulesets:             # bypass_teams reference declared teams
           - {name: …, pattern: refs/tags/…, bypass_teams: […],
-             bypass_apps: […]}     # App NAMES from this org's `apps`
+             bypass_apps: […]}     # App SLUGS, resolved live (see below)
         branch_rulesets: [...]
-    apps:                         # inventory + drift for GitHub Apps
-      <name>:
-        external: true            # third-party: drift detection only
-        permissions: {…}          # compared against live
-        install: all|selected     # and `repos:` when selected
     runner_groups: {…}
 ```
 
@@ -143,15 +137,20 @@ interchangeable (each learned on 2026-08-26):
   bot pushing a tag. Right for release acts; wrong for anything that
   must complete unattended on a PR.
 
-  `bypass_apps` takes App **names** — keys of the same organization's
-  `apps` map — and the loader reads each id back out of the App's own
-  row. The id is a fact the registry already states once; stating it a
-  second time inside a ruleset makes it hand-copied, unreadable and
-  stale the moment an App is recreated. A name that does not resolve is
-  a LOAD ERROR naming the repository and the ruleset, never an actor
-  that quietly goes missing — a dropped bypass says nothing until the
-  act it permits is refused. Resolution is org-scoped: a ruleset can
-  only name an App its own organization declares.
+  `bypass_apps` takes App **slugs**, resolved against the Apps INSTALLED
+  on the organization (`GET /orgs/{org}/installations`) at deploy. The
+  database id is GitHub's fact about an App: written into a file it is
+  hand-copied, unreadable, and stale the moment the App is recreated —
+  stale silently, which is the failure mode that matters. Two refusals
+  keep it honest: an all-digits name is a LOAD error (the field's old
+  spelling), and a name with no live installation stops the DEPLOY,
+  naming the App. Never an actor that quietly goes missing — a dropped
+  bypass says nothing until the act it permits is refused. Resolution is
+  org-scoped because the installation list is: an App installed on a
+  sibling organization does not resolve here.
+
+  The reading costs the engine App `organization_administration: read`,
+  and it is asked for only where some ruleset names a bypass App.
 - **`enforce_admins: false`** is the blunt escape hatch: admins ignore
   the whole classic rule set. Prefer the two above.
 

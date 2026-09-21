@@ -12,9 +12,11 @@
 // (INF-484/INF-487). Adding membership resources here would put two
 // systems in a reconciliation fight over the same objects.
 //
-// It also does not own App creation, installation, or App permissions —
-// GitHub has no API for those (execution plan §4.1). Those live in
-// cmd/githubctl and docs/operations/github-apps-day1.md.
+// It also does not own App creation, installation, or App permissions:
+// GitHub has no API for any of them, and an App's key belongs wherever
+// the estate already keeps credentials. The engine only READS the
+// organization's installations, to turn a ruleset's bypass App slug
+// into the database id the REST API wants.
 //
 // # Import, never recreate
 //
@@ -540,15 +542,15 @@ func deployRepos(
 				return fmt.Errorf("repo %s protection: %w", name, err)
 			}
 
-			if err := deployTagRulesets(c, name, orgCfg, orgCfg.Repos[name].TagRulesets, teams, provider); err != nil {
+			if err := deployTagRulesets(c, name, live.installedApps, orgCfg.Repos[name].TagRulesets, teams, provider); err != nil {
 				return fmt.Errorf("repo %s tag rulesets: %w", name, err)
 			}
 
-			if err := deployBranchRulesets(c, name, orgCfg, orgCfg.Repos[name].BranchRulesets, provider); err != nil {
+			if err := deployBranchRulesets(c, name, live.installedApps, orgCfg.Repos[name].BranchRulesets, provider); err != nil {
 				return fmt.Errorf("repo %s branch rulesets: %w", name, err)
 			}
 
-			if err := deployReviewGate(c, name, orgCfg, resolved, provider); err != nil {
+			if err := deployReviewGate(c, name, live.installedApps, resolved, provider); err != nil {
 				return fmt.Errorf("repo %s review gate: %w", name, err)
 			}
 		}
@@ -919,17 +921,19 @@ func deployProtection(
 func deployTagRulesets(
 	c *pulumi.Context,
 	repoName string,
-	orgCfg *registry.Org,
+	installed registry.InstalledApps,
 	rulesets []*registry.TagRuleset,
 	teams map[string]*github.Team,
 	provider *github.Provider,
 ) error {
 	for _, rs := range rulesets {
-		// Names in, database ids out — resolved against THIS org's App
-		// rows. Validation already refused an unresolvable name at load,
-		// so an error here means a Config built in code rather than
-		// loaded; it still fails rather than silently dropping an actor.
-		appIDs, err := orgCfg.BypassAppIDs(rs.BypassApps)
+		// Names in, database ids out — resolved against the Apps
+		// INSTALLED on this org, read once before any resource was
+		// declared. A name with no installation fails the deploy here
+		// rather than rendering a ruleset with one actor missing: the
+		// gate would stay, the bypass would not, and nothing would say
+		// so until the release act it permits was refused.
+		appIDs, err := installed.BypassAppIDs(rs.BypassApps)
 		if err != nil {
 			return fmt.Errorf("tag ruleset %s: %w", rs.Name, err)
 		}
@@ -1010,15 +1014,15 @@ func deployTagRulesets(
 func deployBranchRulesets(
 	c *pulumi.Context,
 	repoName string,
-	orgCfg *registry.Org,
+	installed registry.InstalledApps,
 	rulesets []*registry.BranchRuleset,
 	provider *github.Provider,
 ) error {
 	for _, rs := range rulesets {
-		// See deployTagRulesets: the registry speaks App names, the
-		// REST API speaks database ids, and an unresolvable name is an
-		// error rather than an actor that quietly goes missing.
-		appIDs, err := orgCfg.BypassAppIDs(rs.BypassApps)
+		// See deployTagRulesets: the registry speaks App names, live
+		// GitHub speaks database ids, and a name that does not resolve
+		// is an error rather than an actor that quietly goes missing.
+		appIDs, err := installed.BypassAppIDs(rs.BypassApps)
 		if err != nil {
 			return fmt.Errorf("branch ruleset %s: %w", rs.Name, err)
 		}
@@ -1128,7 +1132,7 @@ func deployBranchRulesets(
 func deployReviewGate(
 	c *pulumi.Context,
 	name string,
-	orgCfg *registry.Org,
+	installed registry.InstalledApps,
 	r registry.Resolved,
 	provider *github.Provider,
 ) error {
@@ -1137,7 +1141,7 @@ func deployReviewGate(
 		return nil
 	}
 
-	return deployBranchRulesets(c, name, orgCfg, []*registry.BranchRuleset{gate}, provider)
+	return deployBranchRulesets(c, name, installed, []*registry.BranchRuleset{gate}, provider)
 }
 
 // reviewGate is the ruleset a resolved repo's review value asks for, or
