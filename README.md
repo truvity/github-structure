@@ -4,17 +4,17 @@
 makes it survivable.**
 
 One YAML registry describes everything an organization *is*: settings,
-teams, repositories, branch protection, rulesets, Actions policy, the
-GitHub Apps it depends on. A Pulumi engine applies it. A preflight
+teams, repositories, branch protection, rulesets, Actions policy. A
+Pulumi engine applies it. A preflight
 refuses the plans that history shows destroy things. Drift checks find
 what nobody declared.
 
 | Package | What |
 | --- | --- |
 | `pkg/registry` | The registry schema: settings **profiles**, per-repo **overrides with reasons**, **waivers with exit conditions**; strict loading (unknown keys are errors) and validation |
-| `pkg/engine` | The Pulumi engine: org settings, owners, teams, repos, protection, rulesets, Actions permissions, App inventory — import-first adoption of what already exists |
+| `pkg/engine` | The Pulumi engine: org settings, owners, teams, repos, protection, rulesets, Actions permissions — import-first adoption of what already exists |
 | `pkg/preflight` | The guards that run BEFORE the engine: refuse replaces of irreplaceable resources, catch waivers that outlived their cause, refuse plans that empty teams |
-| `pkg/app` | The GitHub App side: App JWT, the REST client, drift checks. It authenticates AS an App; it never creates one |
+| `pkg/app` | The GitHub App side: App JWT, the REST client, drift checks (variables, owners, repo settings, bypass surfaces), and resolving a ruleset's bypass App slugs against the org's live installations. It authenticates AS an App; it never creates, inventories or audits one |
 
 Extracted from a production estate that manages two organizations with
 it; the docs keep the incidents that shaped each rule, because the rule

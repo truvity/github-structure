@@ -83,61 +83,6 @@ func TestJWTRejectsGarbage(t *testing.T) {
 	assert.Contains(t, err.Error(), "PEM")
 }
 
-// ── drift comparison ───────────────────────────────────────────────────
-
-func TestCompareAppClean(t *testing.T) {
-	app := &registry.App{
-		AppID:          10,
-		InstallationID: 20,
-		Install:        registry.InstallAll,
-		Permissions:    map[string]string{"contents": "read", "metadata": "read"},
-	}
-
-	inst := installation{
-		ID: 20, AppID: 10, AppSlug: "x", RepositorySelection: "all",
-		Permissions: map[string]string{"contents": "read", "metadata": "read"},
-	}
-
-	assert.Empty(t, compareApp("x", app, inst))
-}
-
-// The case this exists for: an App silently gains a permission in the
-// browser. IaC cannot prevent it (no API), so it must at least shout.
-func TestCompareAppDetectsWidenedPermission(t *testing.T) {
-	app := &registry.App{
-		AppID: 10, InstallationID: 20, Install: registry.InstallAll,
-		Permissions: map[string]string{"contents": "read"},
-	}
-
-	inst := installation{
-		ID: 20, AppID: 10, RepositorySelection: "all",
-		Permissions: map[string]string{"contents": "write", "administration": "write"},
-	}
-
-	drifts := compareApp("x", app, inst)
-	require.Len(t, drifts, 2)
-
-	// Declared-but-changed first, then present-but-undeclared.
-	assert.Equal(t, "permission contents", drifts[0].Field)
-	assert.Equal(t, "read", drifts[0].Want)
-	assert.Equal(t, "write", drifts[0].Got)
-
-	assert.Equal(t, "permission administration", drifts[1].Field)
-	assert.Equal(t, "", drifts[1].Want, "an undeclared permission has no registry value")
-	assert.Equal(t, "write", drifts[1].Got)
-}
-
-func TestCompareAppDetectsScopeChange(t *testing.T) {
-	app := &registry.App{AppID: 10, InstallationID: 20, Install: registry.InstallSelected}
-	inst := installation{ID: 20, AppID: 10, RepositorySelection: "all"}
-
-	drifts := compareApp("x", app, inst)
-	require.Len(t, drifts, 1)
-	assert.Equal(t, "install", drifts[0].Field)
-	assert.Equal(t, "selected", drifts[0].Want)
-	assert.Equal(t, "all", drifts[0].Got)
-}
-
 // TestCompareOrgVariables exercises each way a variable can drift, and
 // mutates the live side for every case — a test that only checked "no
 // drift when equal" would pass against a function that always returns

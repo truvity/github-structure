@@ -39,6 +39,14 @@ type liveState struct { //nolint:grouper // one type in this file; a group of on
 	// resource requires the field, so the engine passes the live value
 	// through and never diffs it.
 	billingEmail string
+	// installedApps maps an App slug to its database id, for the Apps
+	// installed on this organization — what a ruleset's bypass_apps
+	// names resolve against. Read from GitHub rather than declared: the
+	// id is GitHub's fact about an App, and a copy of it in a file is
+	// stale the moment the App is recreated, silently.
+	//
+	// Empty when no ruleset names an App: see readInstalledApps.
+	installedApps registry.InstalledApps
 }
 
 // readLiveState queries GitHub ONCE, before any resource is declared.
@@ -75,6 +83,10 @@ func readLiveState(
 	}
 
 	if err := state.readGrants(ctx, client, org, orgCfg); err != nil {
+		return nil, err
+	}
+
+	if err := state.readInstalledApps(ctx, client, org, orgCfg); err != nil {
 		return nil, err
 	}
 
@@ -170,6 +182,48 @@ func (s *liveState) readGrants(ctx context.Context, client *app.Client, org stri
 	}
 
 	return nil
+}
+
+// readInstalledApps resolves the org's App installations, but only where
+// a ruleset actually names one.
+//
+// The endpoint needs organization_administration: read, which an estate
+// whose rulesets name no bypass App has no other reason to grant — and a
+// permission demanded for a fact nobody asked for is a permission that
+// gets granted rather than questioned.
+func (s *liveState) readInstalledApps(ctx context.Context, client *app.Client, org string, orgCfg *registry.Org) error {
+	if !namesBypassApps(orgCfg) {
+		return nil
+	}
+
+	installed, err := app.InstalledAppIDs(ctx, client, org)
+	if err != nil {
+		return fmt.Errorf("resolve bypass apps: %w", err)
+	}
+
+	s.installedApps = installed
+
+	return nil
+}
+
+// namesBypassApps reports whether any ruleset in the org names a bypass
+// App at all.
+func namesBypassApps(orgCfg *registry.Org) bool {
+	for _, repo := range orgCfg.Repos {
+		for _, rs := range repo.TagRulesets {
+			if len(rs.BypassApps) > 0 {
+				return true
+			}
+		}
+
+		for _, rs := range repo.BranchRulesets {
+			if len(rs.BypassApps) > 0 {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // grantExists reports whether a team already has access to a repository.

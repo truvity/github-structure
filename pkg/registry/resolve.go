@@ -299,9 +299,6 @@ func (o *Org) SortedTeams() []string { return sortedKeys(o.Teams) }
 // SortedRepos returns repo names in deterministic order.
 func (o *Org) SortedRepos() []string { return sortedKeys(o.Repos) }
 
-// SortedApps returns App names in deterministic order.
-func (o *Org) SortedApps() []string { return sortedKeys(o.Apps) }
-
 // SortedRunnerGroups returns runner-group names in deterministic order.
 func (o *Org) SortedRunnerGroups() []string { return sortedKeys(o.RunnerGroups) }
 
@@ -318,19 +315,6 @@ func (o *Org) ChecksWaived() map[string]string {
 	}
 
 	return waived
-}
-
-// OwnedApps returns the Apps we author (external rows excluded), sorted.
-func (o *Org) OwnedApps() []string {
-	var names []string
-
-	for _, name := range o.SortedApps() {
-		if !o.Apps[name].External {
-			names = append(names, name)
-		}
-	}
-
-	return names
 }
 
 func sortedKeys[V any](m map[string]V) []string {

@@ -134,7 +134,7 @@ func TestReviewRejectsHandWrittenApprovalRuleset(t *testing.T) {
 // App direct-pushes past CI — unless it takes the name the field
 // renders, which would be two declarations of one ruleset.
 func TestReviewAcceptsChecksOnlyRulesetButNotItsName(t *testing.T) {
-	body := withBypassApp(strings.Replace(minimal, "        preset: public\n", `        preset: public
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
         review: none
         branch_rulesets:
           - name: master-check
@@ -142,7 +142,7 @@ func TestReviewAcceptsChecksOnlyRulesetButNotItsName(t *testing.T) {
             required_approvals: 0
             required_checks: [check]
             bypass_apps: [acme-releases]
-`, 1))
+`, 1)
 
 	_, err := load(t, body)
 	require.NoError(t, err)
