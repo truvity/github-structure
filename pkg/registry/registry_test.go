@@ -192,15 +192,23 @@ func TestLoadRejectsUnknownKeys(t *testing.T) {
 	require.Error(t, err)
 }
 
-// ── profile completeness ───────────────────────────────────────────────
+// ── the base, and what a preset may leave out ──────────────────────────
 
-func TestProfileMustBeComplete(t *testing.T) {
+// A preset is a DIFF against GitHub's own new-repository defaults, so a
+// field it does not mention is not unset — it is GitHub's answer, and
+// the engine applies it like any other. This is what replaced the rule
+// that a preset must state all 33 fields: the property that mattered
+// (nothing resolves half-specified, nothing is left unmanaged) is kept
+// by the base, not by the typing.
+func TestPresetMayOmitAFieldAndStillResolveIt(t *testing.T) {
 	body := strings.Replace(minimal, "    has_wiki: true\n", "", 1)
 
-	_, err := load(t, body)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "has_wiki")
-	assert.Contains(t, err.Error(), "incomplete")
+	cfg, err := load(t, body)
+	require.NoError(t, err, "a preset that omits a field is a diff, not an error")
+
+	got, ok := cfg.ResolveRepo("acme", "widget")
+	require.True(t, ok)
+	assert.True(t, got.HasWiki, "omitted means GitHub's default (true), and it is still applied")
 }
 
 func TestProfileRejectsBadVisibility(t *testing.T) {
@@ -842,4 +850,54 @@ func TestSamePresetCanCarryDifferentAccess(t *testing.T) {
 		"same preset, no bundle listed: the grant must NOT be inherited")
 	assert.Equal(t, open.Visibility, shut.Visibility,
 		"and the settings must still be shared — that is the point of the preset")
+}
+
+// ── default_access ─────────────────────────────────────────────────────
+
+// An estate-wide grant is one decision, so it is written once. A row
+// that says nothing takes it; a row that means something else says so.
+func TestDefaultAccessIsInheritedAndOverridable(t *testing.T) {
+	body := strings.Replace(minimal, "  acme:\n", "  acme:\n    default_access: [managers]\n", 1)
+	body = strings.Replace(body, `      widget:
+        preset: public
+        access: [managers]
+`, `      widget:
+        preset: public
+      gadget:
+        preset: public
+        access: []
+      sprocket:
+        preset: public
+        teams:
+          engineers: push
+`, 1)
+
+	cfg, err := load(t, body)
+	require.NoError(t, err)
+
+	inherited, ok := cfg.ResolveRepo("acme", "widget")
+	require.True(t, ok)
+	assert.Equal(t, map[string]string{"management": "pull"}, inherited.Teams,
+		"a row that says nothing about access takes the org's decision")
+
+	optedOut, ok := cfg.ResolveRepo("acme", "gadget")
+	require.True(t, ok)
+	assert.Empty(t, optedOut.Teams,
+		"an explicit empty list is how a row opts out — silence and refusal must not look the same")
+
+	// Inheriting the bundle does not stop a row adding its own grants:
+	// `teams:` layers over whatever access resolved to.
+	both, ok := cfg.ResolveRepo("acme", "sprocket")
+	require.True(t, ok)
+	assert.Equal(t, map[string]string{"management": "pull", "engineers": "push"}, both.Teams)
+}
+
+// A default that names a bundle nobody declared is the same typo as one
+// written on a row, and fails the same way.
+func TestDefaultAccessMustNameDeclaredBundles(t *testing.T) {
+	body := strings.Replace(minimal, "  acme:\n", "  acme:\n    default_access: [nonesuch]\n", 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nonesuch")
 }

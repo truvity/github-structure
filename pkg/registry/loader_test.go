@@ -58,3 +58,14 @@ func TestLoadReturnsErrorOnMalformedYAML(t *testing.T) {
 
 	assert.Error(t, load(fsys, "bad.yaml", &dst))
 }
+
+// The base has to be complete, because it is the only thing standing
+// between a preset's silence and an unmanaged field. A field added to
+// RepoSettings and forgotten here would resolve to the zero value —
+// false, "" — and the engine would apply THAT, which is worse than
+// leaving it alone.
+func TestGitHubDefaultsAreComplete(t *testing.T) {
+	missing := gitHubDefaults().missingFields()
+	assert.Empty(t, missing,
+		"gitHubDefaults must set every field a preset may omit; add the new field to base.go with GitHub's own answer")
+}

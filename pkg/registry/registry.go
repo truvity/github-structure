@@ -188,6 +188,21 @@ type (
 		// Teams are the org's teams, keyed by slug. Membership is NOT
 		// modeled here — that is the roster service's territory
 		// (INF-484/INF-487); this engine owns structure only.
+		// DefaultAccess are the access bundles every repository in this
+		// org gets unless its row says otherwise. It exists because an
+		// estate-wide grant written per row is fifty copies of one
+		// decision: trust-form grants the same three teams push on all
+		// but one of its repositories, and fifty copies can drift while
+		// one cannot.
+		//
+		// A row OPTS OUT with an explicit empty list (`access: []`), and
+		// overrides by naming its own bundles. Absent means inherit —
+		// which is why this is applied at load: everything downstream
+		// (resolution, entitlements, drift) then sees one effective row,
+		// and the resolved state still shows every grant per repository,
+		// so the inheritance is readable where it matters.
+		DefaultAccess []string `yaml:"default_access,omitempty"`
+
 		Teams map[string]*Team `yaml:"teams"`
 		// Repos are the in-scope repositories, keyed by name.
 		Repos map[string]*Repo `yaml:"repos"`
@@ -640,11 +655,36 @@ func Load(fsys fs.FS) (*Config, error) {
 		return nil, err
 	}
 
+	c.applyDefaultAccess()
+
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("github.yaml: %w", err)
 	}
 
 	return &c, nil
+}
+
+// applyDefaultAccess gives every repository its org's default bundles
+// unless its row decided for itself. Before validation, so an inherited
+// bundle name is checked exactly like a written one.
+//
+// Absent (nil) inherits; an explicit empty list opts out. That asymmetry
+// is the whole feature: a row that says nothing takes the estate's
+// decision, and a row that means "none" has to say so — which is a
+// sentence somebody wrote, not a key somebody forgot.
+func (c *Config) applyDefaultAccess() {
+	for _, login := range c.SortedOrgs() {
+		org := c.Orgs[login]
+		if len(org.DefaultAccess) == 0 {
+			continue
+		}
+
+		for _, name := range org.SortedRepos() {
+			if repo := org.Repos[name]; repo.Access == nil {
+				repo.Access = org.DefaultAccess
+			}
+		}
+	}
 }
 
 // orgsDeclaringApps re-reads the file leniently to name the orgs that
@@ -713,8 +753,13 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// validateProfile requires a profile to be COMPLETE: every field set, so
-// a repo row can never resolve to a half-specified resource.
+// validatePreset checks a preset's VALUES. It no longer demands that a
+// preset set every field: a preset is a diff against gitHubDefaults, and
+// completeness is a property of the resolved state, which base.go
+// guarantees and TestGitHubDefaultsAreComplete pins.
+//
+// What is still refused is a value that cannot mean what it says, and
+// the combinations the engine would obey silently.
 func validatePreset(name string, p *RepoSettings) error {
 	if !slugPattern.MatchString(name) {
 		return fmt.Errorf("preset %q: invalid name", name)
@@ -724,25 +769,27 @@ func validatePreset(name string, p *RepoSettings) error {
 		return fmt.Errorf("preset %q: empty", name)
 	}
 
-	missing := p.missingFields()
-	if len(missing) > 0 {
-		return fmt.Errorf("preset %q: incomplete, missing %s (profiles must set every field; partial specs belong in a repo's overrides)",
-			name, strings.Join(missing, ", "))
+	// Effective values, so a check below reads what the preset MEANS
+	// whether it stated a field or inherited it. `p` stays the preset
+	// itself: overlay carries settings and not `review`, which is this
+	// registry's own vocabulary rather than a GitHub setting, so reading
+	// review off the merged copy would skip its validation entirely.
+	eff := *gitHubDefaults()
+	eff.overlay(p)
+
+	if !validVisibility[*eff.Visibility] {
+		return fmt.Errorf("preset %q: visibility %q must be public or private", name, *eff.Visibility)
 	}
 
-	if !validVisibility[*p.Visibility] {
-		return fmt.Errorf("preset %q: visibility %q must be public or private", name, *p.Visibility)
+	if !validAllowedActions[*eff.Actions.AllowedActions] {
+		return fmt.Errorf("preset %q: actions.allowed_actions %q invalid", name, *eff.Actions.AllowedActions)
 	}
 
-	if !validAllowedActions[*p.Actions.AllowedActions] {
-		return fmt.Errorf("preset %q: actions.allowed_actions %q invalid", name, *p.Actions.AllowedActions)
+	if !validWorkflowPermissions[*eff.Actions.DefaultWorkflowPermissions] {
+		return fmt.Errorf("preset %q: actions.default_workflow_permissions %q must be read or write", name, *eff.Actions.DefaultWorkflowPermissions)
 	}
 
-	if !validWorkflowPermissions[*p.Actions.DefaultWorkflowPermissions] {
-		return fmt.Errorf("preset %q: actions.default_workflow_permissions %q must be read or write", name, *p.Actions.DefaultWorkflowPermissions)
-	}
-
-	if n := *p.Protection.RequiredApprovals; n < 0 || n > 6 {
+	if n := *eff.Protection.RequiredApprovals; n < 0 || n > 6 {
 		return fmt.Errorf("preset %q: protection.required_approvals %d out of range 0..6", name, n)
 	}
 
@@ -755,10 +802,10 @@ func validatePreset(name string, p *RepoSettings) error {
 		// default-branch rule; leaving a preset's classic approval
 		// block set too would make the file say two things and the
 		// engine obey one of them silently.
-		if *p.Protection.RequiredApprovals != 0 {
+		if *eff.Protection.RequiredApprovals != 0 {
 			return fmt.Errorf("preset %q: review %q with protection.required_approvals %d —"+
 				" review owns the approval gate; set required_approvals to 0",
-				name, *p.Review, *p.Protection.RequiredApprovals)
+				name, *p.Review, *eff.Protection.RequiredApprovals)
 		}
 	}
 
@@ -882,6 +929,15 @@ func (c *Config) validateOrg(login string, org *Org) error {
 
 	if org.Settings == nil {
 		return fmt.Errorf("org %q: settings are required", login)
+	}
+
+	// Checked here and not only where it is inherited: a default every
+	// row happens to override today is still a typo, and one nobody
+	// notices until the row that would have used it is added.
+	for _, bundle := range org.DefaultAccess {
+		if _, ok := c.Access[bundle]; !ok {
+			return fmt.Errorf("org %q: default_access %q names no declared access bundle", login, bundle)
+		}
 	}
 
 	if p := org.Settings.DefaultRepositoryPermission; p != "none" && p != "read" && p != "write" && p != "admin" {

@@ -81,7 +81,12 @@ func (c *Config) Resolve(repo *Repo) Resolved {
 		return Resolved{}
 	}
 
-	merged := *preset
+	// base <- preset <- overrides. The base (gitHubDefaults) is what
+	// makes a preset a DIFF: every field is still set on the way out, so
+	// every field is still applied and nothing is left unmanaged — see
+	// base.go for why that property is the whole point.
+	merged := *gitHubDefaults()
+	merged.overlay(preset)
 	merged.overlay(repo.Overrides)
 
 	// A waiver drops the preset's required checks for this repo. The
