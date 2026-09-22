@@ -42,9 +42,6 @@ answer is `checks_waived:` — free text that must state when the waiver
 dies ("delete when ci.yaml reports `check` on master"). The preflight
 probes live CI and **fails the deploy once the waiver's exit condition
 has come true**: an exception can exist, but it cannot be forgotten.
-Where one reason covers many repositories, the org lists them under it
-(`checks_waived:` at the org level) — the reason once, the names as a
-list, the same waiver on every row.
 
 **3. The engine must not be able to do the worst thing.** Some resources
 hold state that lives outside any Pulumi stack — a team's membership, a
@@ -79,8 +76,9 @@ never reaches Pulumi), and validate applies with `pulumi preview
 
 ## Documentation
 
-- [docs/doctrine.md](docs/doctrine.md) — the registry model: profiles,
-  overrides, waivers, merge-gate patterns, the structure/membership split
+- [docs/doctrine.md](docs/doctrine.md) — the registry model: presets as
+  diffs, overrides with reasons, the review gate, waivers, what is
+  written once, the structure/membership split
 - [docs/safety.md](docs/safety.md) — every guard, with the incident that
   produced it
 - [docs/adoption.md](docs/adoption.md) — adopting an existing organization
