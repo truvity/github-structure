@@ -91,8 +91,27 @@ func TestNamedTagRulesetUnknownReferenceIsRefused(t *testing.T) {
 	assert.Contains(t, err.Error(), `references "release-tag", which the org does not define`)
 }
 
-func TestNamedTagRulesetMayNotBeRewrittenInline(t *testing.T) {
-	both := strings.Replace(namedRuleset, `
+func TestNamedTagRulesetCopiedInlineIsRefused(t *testing.T) {
+	copyOf := strings.Replace(namedRuleset, `
+        tag_rulesets: [release-tags]
+`, `
+        tag_rulesets:
+          - name: release-tags
+            pattern: refs/tags/v*
+            bypass_teams: [management]
+            bypass_apps: [automation]
+`, 1)
+
+	_, err := load(t, withRepos(copyOf))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is a copy of the org-level one")
+}
+
+func TestNamedTagRulesetDeviationUnderTheSameNameIsAOneOff(t *testing.T) {
+	// The name is the key of a LIVE per-repository resource: a row whose
+	// rule deliberately differs (here: no bypass App) keeps its name
+	// rather than being forced into a rename that replaces the ruleset.
+	deviation := strings.Replace(namedRuleset, `
         tag_rulesets: [release-tags]
 `, `
         tag_rulesets:
@@ -101,9 +120,9 @@ func TestNamedTagRulesetMayNotBeRewrittenInline(t *testing.T) {
             bypass_teams: [management]
 `, 1)
 
-	_, err := load(t, withRepos(both))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "defined at the org level")
+	cfg, err := load(t, withRepos(deviation))
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Orgs["acme"].Repos["widget"].TagRulesets[0].BypassApps, "the row's own body wins")
 }
 
 func TestNamedTagRulesetKeyIsTheName(t *testing.T) {

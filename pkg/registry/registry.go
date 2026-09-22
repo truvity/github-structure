@@ -211,8 +211,12 @@ type (
 		// which is the tell that they were one decision.
 		//
 		// A row may still write a ruleset inline — that is what a
-		// one-off is — but it may not write one under a name the org
-		// defines, because two bodies for one name is how they disagree.
+		// one-off is — and it may even share a display name with an
+		// org-level one, because the name is the key of a live
+		// per-repository resource and a forced rename would replace it.
+		// What it may not do is write a COPY: a body identical to the
+		// org's under the same name is refused, with the reference as
+		// the fix.
 		// Resolved at load into an ordinary row ruleset, so the engine,
 		// drift and preflight see the same struct they always did.
 		TagRulesets map[string]*TagRuleset `yaml:"tag_rulesets,omitempty"`
@@ -660,6 +664,29 @@ type (
 	}
 )
 
+// sameBody reports whether two rulesets would render the same rule —
+// everything but the name, which the caller has already matched.
+func (r *TagRuleset) sameBody(o *TagRuleset) bool {
+	return r.Pattern == o.Pattern &&
+		r.BypassOrgAdmins == o.BypassOrgAdmins &&
+		sameStrings(r.BypassTeams, o.BypassTeams) &&
+		sameStrings(r.BypassApps, o.BypassApps)
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
 // tagRulesetKeys are the keys a tag ruleset body may carry. Listed by
 // hand because a custom UnmarshalYAML decodes through yaml.Node, which
 // does not inherit the loader's KnownFields — and a typo in a ruleset
@@ -871,9 +898,17 @@ func (c *Config) resolveTagRulesetRefs() error {
 				}
 
 				if rs.Ref == "" {
-					if _, defined := org.TagRulesets[rs.Name]; defined {
-						return fmt.Errorf("org %q repo %q: tag ruleset %q is defined at the org level —"+
-							" reference it by name instead of writing a second body", login, repoName, rs.Name)
+					// A body under an org-defined name is refused only when
+					// it is a COPY: that is the duplication this feature
+					// exists to end. A body that differs is a one-off that
+					// happens to share a display name — rulesets are
+					// per-repository objects, and the name is the key of a
+					// LIVE resource, so demanding a rename here would force
+					// a replacement (and its unprotected window) on a
+					// repository whose deviation is the whole point.
+					if def, defined := org.TagRulesets[rs.Name]; defined && def.sameBody(rs) {
+						return fmt.Errorf("org %q repo %q: tag ruleset %q is a copy of the org-level one —"+
+							" reference it by name instead of writing the body again", login, repoName, rs.Name)
 					}
 
 					continue
