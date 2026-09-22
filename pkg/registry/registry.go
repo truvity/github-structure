@@ -202,6 +202,39 @@ type (
 		// and the resolved state still shows every grant per repository,
 		// so the inheritance is readable where it matters.
 		DefaultAccess []string `yaml:"default_access,omitempty"`
+		// TagRulesets are the org's NAMED tag rulesets: a body written
+		// once, keyed by the ruleset's display name, that a repository
+		// row references by that name inside its own `tag_rulesets:`
+		// list. Eight repositories carrying the same release gate used
+		// to be eight copies of it, each with the comment explaining the
+		// bypass App; the copies drifted in wording and nowhere else,
+		// which is the tell that they were one decision.
+		//
+		// A row may still write a ruleset inline — that is what a
+		// one-off is — but it may not write one under a name the org
+		// defines, because two bodies for one name is how they disagree.
+		// Resolved at load into an ordinary row ruleset, so the engine,
+		// drift and preflight see the same struct they always did.
+		TagRulesets map[string]*TagRuleset `yaml:"tag_rulesets,omitempty"`
+		// Waivers are `checks_waived`, grouped by reason: the reason
+		// text once, and the repositories it covers as a list. It is the
+		// same fact as the row field — a repo whose CI does not report
+		// yet — and lands on each row at load, so ChecksWaived(),
+		// preflight's stale-waiver guard and the archived-repo refusal
+		// all keep working on the row.
+		//
+		// It exists because sixty rows carrying the identical sentence
+		// is not sixty decisions, it is one decision with sixty names,
+		// and an exception listed in one place is an exception somebody
+		// revisits. A row may still carry its own `checks_waived:` for a
+		// reason that is its alone; a repo named here AND on its row is
+		// refused, as is a repo named under two reasons.
+		Waivers map[string][]string `yaml:"checks_waived,omitempty"`
+		// TeamDefaults fill a team's privacy and notification setting
+		// where the team's row leaves them unsaid. Twenty-one of
+		// twenty-one teams saying `privacy: closed` is a policy, not
+		// twenty-one choices; the row keeps the right to differ.
+		TeamDefaults *TeamDefaults `yaml:"team_defaults,omitempty"`
 
 		Teams map[string]*Team `yaml:"teams"`
 		// Repos are the in-scope repositories, keyed by name.
@@ -337,6 +370,15 @@ type (
 		Description   string `yaml:"description,omitempty"`
 		Privacy       string `yaml:"privacy,omitempty"`
 		Parent        string `yaml:"parent,omitempty"`
+		Notifications string `yaml:"notifications,omitempty"`
+	}
+
+	// TeamDefaults are the values a team row inherits for the fields it
+	// leaves empty (see Org.TeamDefaults). Only the two settings every
+	// team must answer: a name, a description and a parent are each
+	// team's own.
+	TeamDefaults struct {
+		Privacy       string `yaml:"privacy,omitempty"`
 		Notifications string `yaml:"notifications,omitempty"`
 	}
 
@@ -500,6 +542,12 @@ type (
 		// ignores the documented 1 on write and returns 0 on read, so
 		// 0 is the only drift-free spelling).
 		BypassOrgAdmins bool `yaml:"bypass_org_admins,omitempty"`
+		// Ref is the name a row wrote INSTEAD of a body — `tag_rulesets:
+		// [release-tags]` — pointing at the org's named ruleset of that
+		// name. Set by UnmarshalYAML when the list item is a bare
+		// string; replaced by a copy of the definition at load, so it
+		// is never set on a Config that Load returned.
+		Ref string `yaml:"-"`
 	}
 
 	// RepoSettings is both a profile (all fields set) and an override
@@ -612,6 +660,53 @@ type (
 	}
 )
 
+// tagRulesetKeys are the keys a tag ruleset body may carry. Listed by
+// hand because a custom UnmarshalYAML decodes through yaml.Node, which
+// does not inherit the loader's KnownFields — and a typo in a ruleset
+// that loaded silently would be the one field this file never rejects.
+var tagRulesetKeys = map[string]bool{
+	"name": true, "pattern": true, "bypass_teams": true,
+	"bypass_apps": true, "bypass_org_admins": true,
+}
+
+// UnmarshalYAML lets a row's `tag_rulesets:` item be either a body or
+// the NAME of one the org defines (Org.TagRulesets). A bare string is a
+// reference; a mapping is a body, decoded strictly.
+func (r *TagRuleset) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		if n.Value == "" {
+			return fmt.Errorf("tag_rulesets: an empty name references nothing")
+		}
+
+		*r = TagRuleset{Ref: n.Value}
+
+		return nil
+	}
+
+	if n.Kind != yaml.MappingNode {
+		return fmt.Errorf("tag_rulesets: each item is a ruleset body or the name of an org-level one")
+	}
+
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if key := n.Content[i].Value; !tagRulesetKeys[key] {
+			return fmt.Errorf("tag_rulesets: field %s not found in type registry.TagRuleset", key)
+		}
+	}
+
+	// A named type with no methods, so Decode does not recurse into
+	// this function.
+	type body TagRuleset
+
+	var b body
+	if err := n.Decode(&b); err != nil {
+		return err
+	}
+
+	*r = TagRuleset(b)
+
+	return nil
+}
+
 // InstalledApps is one organization's App installations, as slug → App
 // database id: the answer GET /orgs/{org}/installations gives.
 //
@@ -656,12 +751,146 @@ func Load(fsys fs.FS) (*Config, error) {
 	}
 
 	c.applyDefaultAccess()
+	c.applyTeamDefaults()
+
+	if err := c.applyWaivers(); err != nil {
+		return nil, fmt.Errorf("github.yaml: %w", err)
+	}
+
+	if err := c.resolveTagRulesetRefs(); err != nil {
+		return nil, fmt.Errorf("github.yaml: %w", err)
+	}
 
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("github.yaml: %w", err)
 	}
 
 	return &c, nil
+}
+
+// applyTeamDefaults fills each team's empty privacy and notification
+// fields from the org's defaults. Before validation, so an inherited
+// value is checked exactly like a written one. A team that wrote the
+// field keeps what it wrote.
+func (c *Config) applyTeamDefaults() {
+	for _, login := range c.SortedOrgs() {
+		org := c.Orgs[login]
+		if org.TeamDefaults == nil {
+			continue
+		}
+
+		for _, slug := range org.SortedTeams() {
+			team := org.Teams[slug]
+			if team == nil {
+				continue
+			}
+
+			if team.Privacy == "" {
+				team.Privacy = org.TeamDefaults.Privacy
+			}
+
+			if team.Notifications == "" {
+				team.Notifications = org.TeamDefaults.Notifications
+			}
+		}
+	}
+}
+
+// applyWaivers lands each org-level waiver on the row it names, so the
+// row is what everything downstream reads. It refuses what would make
+// the file say two things: a repo named on its row AND here, a repo
+// named under two reasons, a repo that does not exist, and a reason
+// with nobody under it.
+func (c *Config) applyWaivers() error {
+	for _, login := range c.SortedOrgs() {
+		org := c.Orgs[login]
+
+		for _, reason := range sortedKeys(org.Waivers) {
+			names := org.Waivers[reason]
+
+			if strings.TrimSpace(reason) == "" {
+				return fmt.Errorf("org %q: checks_waived: a waiver needs a reason — the exit condition is the whole point", login)
+			}
+
+			if len(names) == 0 {
+				return fmt.Errorf("org %q: checks_waived %q: names no repository — delete it", login, reason)
+			}
+
+			for _, name := range names {
+				repo, ok := org.Repos[name]
+				if !ok {
+					return fmt.Errorf("org %q: checks_waived %q: repo %q is not declared", login, reason, name)
+				}
+
+				if repo.ChecksWaived != "" {
+					return fmt.Errorf("org %q: checks_waived %q: repo %q is already waived (%q) —"+
+						" a repository is waived once, on its row or in the org list, never both",
+						login, reason, name, repo.ChecksWaived)
+				}
+
+				repo.ChecksWaived = reason
+			}
+		}
+	}
+
+	return nil
+}
+
+// resolveTagRulesetRefs turns every by-name reference in a row's
+// tag_rulesets into a copy of the org's definition, and gives each
+// definition its name from its key. After this, no TagRuleset carries a
+// Ref, and the engine sees rows exactly as it did when every body was
+// written inline.
+func (c *Config) resolveTagRulesetRefs() error {
+	for _, login := range c.SortedOrgs() {
+		org := c.Orgs[login]
+
+		for _, name := range sortedKeys(org.TagRulesets) {
+			def := org.TagRulesets[name]
+			if def == nil {
+				return fmt.Errorf("org %q: tag_rulesets %q: empty definition", login, name)
+			}
+
+			switch {
+			case def.Ref != "":
+				return fmt.Errorf("org %q: tag_rulesets %q: an org-level ruleset is a body, not a reference", login, name)
+			case def.Name != "" && def.Name != name:
+				return fmt.Errorf("org %q: tag_rulesets %q: name %q disagrees with the key — the key IS the name; drop the field",
+					login, name, def.Name)
+			}
+
+			def.Name = name
+		}
+
+		for _, repoName := range org.SortedRepos() {
+			repo := org.Repos[repoName]
+
+			for i, rs := range repo.TagRulesets {
+				if rs == nil {
+					continue
+				}
+
+				if rs.Ref == "" {
+					if _, defined := org.TagRulesets[rs.Name]; defined {
+						return fmt.Errorf("org %q repo %q: tag ruleset %q is defined at the org level —"+
+							" reference it by name instead of writing a second body", login, repoName, rs.Name)
+					}
+
+					continue
+				}
+
+				def, ok := org.TagRulesets[rs.Ref]
+				if !ok {
+					return fmt.Errorf("org %q repo %q: tag_rulesets references %q, which the org does not define", login, repoName, rs.Ref)
+				}
+
+				resolved := *def
+				repo.TagRulesets[i] = &resolved
+			}
+		}
+	}
+
+	return nil
 }
 
 // applyDefaultAccess gives every repository its org's default bundles
@@ -937,6 +1166,33 @@ func (c *Config) validateOrg(login string, org *Org) error {
 	for _, bundle := range org.DefaultAccess {
 		if _, ok := c.Access[bundle]; !ok {
 			return fmt.Errorf("org %q: default_access %q names no declared access bundle", login, bundle)
+		}
+	}
+
+	if d := org.TeamDefaults; d != nil {
+		if d.Privacy != "" && !validPrivacy[d.Privacy] {
+			return fmt.Errorf("org %q: team_defaults.privacy %q must be closed or secret", login, d.Privacy)
+		}
+
+		if d.Notifications != "" && !validNotifications[d.Notifications] {
+			return fmt.Errorf("org %q: team_defaults.notifications %q must be enabled or disabled", login, d.Notifications)
+		}
+	}
+
+	// An org-level ruleset is held to the same rules as a row's, whether
+	// or not any row references it yet: a definition that would fail on
+	// first use is a trap somebody else springs.
+	for _, name := range sortedKeys(org.TagRulesets) {
+		if err := validateTagRuleset(login, "tag_rulesets", org, org.TagRulesets[name], name); err != nil {
+			return err
+		}
+	}
+
+	for _, reason := range sortedKeys(org.Waivers) {
+		for _, name := range org.Waivers[reason] {
+			if _, ok := org.Repos[name]; !ok {
+				return fmt.Errorf("org %q: checks_waived %q: repo %q is not declared", login, reason, name)
+			}
 		}
 	}
 
@@ -1276,6 +1532,13 @@ func validateTagRulesets(login, name string, org *Org, repo *Repo) error {
 	seen := make(map[string]bool, len(repo.TagRulesets))
 
 	for i, rs := range repo.TagRulesets {
+		if rs != nil && rs.Ref != "" {
+			// Load resolves references before validating; a Config built
+			// by hand and validated directly still has to be told.
+			return fmt.Errorf("org %q repo %q: tag_rulesets[%d] references %q, which was never resolved —"+
+				" load the registry with Load, or write the body", login, name, i, rs.Ref)
+		}
+
 		if rs == nil || rs.Name == "" {
 			return fmt.Errorf("org %q repo %q: tag_rulesets[%d]: name is required", login, name, i)
 		}
@@ -1286,30 +1549,45 @@ func validateTagRulesets(login, name string, org *Org, repo *Repo) error {
 
 		seen[rs.Name] = true
 
-		if !strings.HasPrefix(rs.Pattern, "refs/tags/") {
-			return fmt.Errorf("org %q repo %q: tag ruleset %q: pattern %q must start with refs/tags/",
-				login, name, rs.Name, rs.Pattern)
+		if err := validateTagRuleset(login, "repo "+name, org, rs, rs.Name); err != nil {
+			return err
 		}
+	}
 
-		if len(rs.BypassTeams) == 0 {
-			return fmt.Errorf("org %q repo %q: tag ruleset %q: at least one bypass team is required —"+
-				" with none, nobody can ever create a matching tag", login, name, rs.Name)
-		}
+	return nil
+}
 
-		for _, team := range rs.BypassTeams {
-			if _, ok := org.Teams[team]; !ok {
-				return fmt.Errorf("org %q repo %q: tag ruleset %q: bypass team %q is not in this org's teams",
-					login, name, rs.Name, team)
-			}
-		}
+// validateTagRuleset holds one ruleset body, wherever it was written, to
+// the rules a tag ruleset must satisfy. `where` names the place for the
+// error: a repository row, or the org's own list.
+func validateTagRuleset(login, where string, org *Org, rs *TagRuleset, name string) error {
+	if rs == nil {
+		return fmt.Errorf("org %q %s: tag ruleset %q: empty", login, where, name)
+	}
 
-		// Only the SPELLING is checkable here. Whether the App is
-		// installed is a question for live GitHub, and the load path has
-		// no credentials — so the existence half runs at deploy, where
-		// the answer is authoritative rather than a copy of it.
-		if err := refuseAppIDSpellings(rs.BypassApps); err != nil {
-			return fmt.Errorf("org %q repo %q: tag ruleset %q: %w", login, name, rs.Name, err)
+	if !strings.HasPrefix(rs.Pattern, "refs/tags/") {
+		return fmt.Errorf("org %q %s: tag ruleset %q: pattern %q must start with refs/tags/",
+			login, where, name, rs.Pattern)
+	}
+
+	if len(rs.BypassTeams) == 0 {
+		return fmt.Errorf("org %q %s: tag ruleset %q: at least one bypass team is required —"+
+			" with none, nobody can ever create a matching tag", login, where, name)
+	}
+
+	for _, team := range rs.BypassTeams {
+		if _, ok := org.Teams[team]; !ok {
+			return fmt.Errorf("org %q %s: tag ruleset %q: bypass team %q is not in this org's teams",
+				login, where, name, team)
 		}
+	}
+
+	// Only the SPELLING is checkable here. Whether the App is
+	// installed is a question for live GitHub, and the load path has
+	// no credentials — so the existence half runs at deploy, where
+	// the answer is authoritative rather than a copy of it.
+	if err := refuseAppIDSpellings(rs.BypassApps); err != nil {
+		return fmt.Errorf("org %q %s: tag ruleset %q: %w", login, where, name, err)
 	}
 
 	return nil

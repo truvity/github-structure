@@ -61,10 +61,12 @@ file.
 
 ## Day-1 for a NEW repository (created by the engine)
 
-1. Add the row: profile + `checks_waived` with the standard exit text
-   (a new repo has no CI; without the waiver its required `check` blocks
-   every PR forever — and with no waiver the repo cannot even be
-   created, because preflight would refuse the plan).
+1. Add the row: profile + the waiver — either `checks_waived` on the
+   row with the standard exit text, or the repository's name under the
+   org's `checks_waived:` list for that reason (a new repo has no CI;
+   without the waiver its required `check` blocks every PR forever — and
+   with no waiver the repo cannot even be created, because preflight
+   would refuse the plan).
 2. Deploy. The engine creates repo + Actions settings + protection.
 3. Push the initial content (no protection obstacle: `required_approvals: 0`
    profiles allow direct pushes until required checks exist).

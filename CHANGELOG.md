@@ -8,6 +8,37 @@ taking a new one.
 
 ### Added
 
+- **Said once: named tag rulesets, waivers by reason, team defaults.**
+  Three more places where an estate wrote one decision many times.
+
+  - `tag_rulesets:` at the **org** level is a map of ruleset bodies
+    keyed by display name; a row's `tag_rulesets:` list may name one
+    instead of carrying a body (`tag_rulesets: [release-tags]`). A row
+    may not write a body under a name the org defines. The key is the
+    name, on purpose: the engine keys the live ruleset on repo + name,
+    so this is a reference, never a rename.
+  - `checks_waived:` at the **org** level maps a reason to the
+    repositories it covers. Same fact as the row field, landed on each
+    row at load; a repository named twice (row and list, or two
+    reasons) is refused.
+  - `team_defaults:` on an org fills `privacy` and `notifications` where
+    a team row leaves them unsaid.
+
+  All three resolve at load into the rows they replace: `Org.Repos[…]`,
+  `Org.Teams[…]` and `Org.ChecksWaived()` read exactly as before, and an
+  estate that adopts them produces a byte-identical resolved state.
+  Nothing to do on upgrade; nothing changes for a file that uses none of
+  them.
+
+  One behavioural note for Go callers: a `TagRuleset` decoded from YAML
+  now goes through `UnmarshalYAML` (a bare string is a reference), and
+  `Validate()` on a hand-built `Config` refuses an unresolved reference —
+  `Load` is what resolves them.
+
+## 0.10.0 — 2026-09-21
+
+### Added
+
 - **A preset is a diff against GitHub's defaults.** A preset used to have
   to state all 33 settings fields; it now states only what differs from
   what GitHub creates a repository with. `private` goes from 33 lines to
@@ -33,6 +64,8 @@ taking a new one.
   and the resolved state still shows every grant per repository. A
   `default_access` naming an undeclared bundle fails the load even if no
   row inherits it today.
+
+## 0.9.0 — 2026-09-21
 
 ### Changed
 

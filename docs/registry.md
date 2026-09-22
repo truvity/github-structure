@@ -46,8 +46,16 @@ orgs:
                                   # library declares the place only.
     settings: {…}                 # org-level toggles
     owners: [login, …]            # asserted (promote-only) + drift-checked
+    team_defaults:                # what a team row inherits for the
+      privacy: closed             # fields it leaves unsaid; a row that
+      notifications: enabled      # writes the field keeps what it wrote
     teams:
       <slug>: {privacy: …, parent: …}   # existence/nesting — NEVER members
+    tag_rulesets:                 # NAMED bodies, written once, that a
+      <name>:                     # row references by name below
+        {pattern: refs/tags/…, bypass_teams: […], bypass_apps: […]}
+    checks_waived:                # waivers grouped by REASON: the text
+      <reason>: [<name>, …]       # once, the repositories as a list
     repos:
       <name>:
         profile: <profile-name>
@@ -64,8 +72,9 @@ orgs:
           reason: …               # the decision that made it deliberate
           protection: {…}
         tag_rulesets:             # bypass_teams reference declared teams
+          - <name>                # …the org's named ruleset of that name
           - {name: …, pattern: refs/tags/…, bypass_teams: […],
-             bypass_apps: […]}     # App SLUGS, resolved live (see below)
+             bypass_apps: […]}     # …or a one-off body. App SLUGS, live
         branch_rulesets: [...]
     runner_groups: {…}
 ```
@@ -143,6 +152,60 @@ the feature — a row that means "no grants" has to say so, so it reads as
 a decision rather than a forgotten key. Inheritance is applied at load,
 so resolution, entitlements and drift all see one effective row, and the
 resolved state still shows every grant per repository.
+
+## Said once — named tag rulesets, waivers by reason, team defaults
+
+Three more places where an estate used to write one decision many
+times. Each resolves **at load** into exactly the rows it replaces, so
+the engine, drift and preflight see the structs they always saw, and an
+estate that adopts them changes nothing it applies — the resolved state
+before and after is the proof.
+
+**A named tag ruleset** is a body under the org's `tag_rulesets:`, keyed
+by the ruleset's display name; a row's `tag_rulesets:` list then names
+it. A row may still write a one-off body, but not under a name the org
+defines — two bodies for one name is how they disagree. The key *is* the
+name: a row referencing `release-tags` renders a ruleset called
+`release-tags`, which matters because the engine keys the live resource
+on repo + name, so renaming is a replacement with an unprotected window.
+
+```yaml
+orgs:
+  example:
+    tag_rulesets:
+      release-tags:
+        pattern: refs/tags/v*
+        bypass_teams: [role-release]
+        bypass_apps: [ci-automation]
+    repos:
+      library:  {preset: public, tag_rulesets: [release-tags]}
+      another:  {preset: public, tag_rulesets: [release-tags]}
+      oddity:                                     # a one-off stays inline
+        preset: public
+        tag_rulesets:
+          - {name: project-tags, pattern: "refs/tags/*/v*", bypass_teams: [role-release]}
+```
+
+**Waivers by reason** are the org's `checks_waived:` — a map from the
+reason to the repositories it covers. It is the same fact as the row's
+`checks_waived:`, landed on each row at load, so `Org.ChecksWaived()`,
+the preflight's stale-waiver guard and the archived-repository refusal
+keep working unchanged. A repository is waived once: named on its row
+*and* here, or under two reasons, is refused. A row keeps its own
+`checks_waived:` for a reason that is its alone.
+
+```yaml
+orgs:
+  example:
+    checks_waived:
+      "no workflow here reports `check` yet": [alpha, beta, gamma]
+      "the workflows here deploy; none reports `check`": [delta]
+```
+
+**Team defaults** fill `privacy` and `notifications` where a team's row
+leaves them unsaid; a row that writes the field keeps what it wrote.
+Applied before validation, so an inherited `secret` on a nested team is
+refused exactly as a written one would be.
 
 ## `review` — one field decides how a pull request becomes a merge
 
