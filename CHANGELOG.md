@@ -35,6 +35,15 @@ taking a new one.
   `Validate()` on a hand-built `Config` refuses an unresolved reference —
   `Load` is what resolves them.
 
+### Changed
+
+- Documentation only: `docs/doctrine.md` described the model two
+  releases ago — "a profile must set every field" and an approval gate
+  spelled as a `required_approvals: 0` override, both retired by 0.9.0
+  and 0.10.0. It now describes presets as diffs and `review:`, and says
+  each thing in one place: the *why* in doctrine, the schema in
+  registry, the guards and their incidents in safety.
+
 ## 0.10.0 — 2026-09-21
 
 ### Added

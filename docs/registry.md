@@ -132,10 +132,16 @@ silently drifts.
 preset: a chain is a thing you have to unwind in your head to know what
 a repository gets, and eleven presets taught that lesson once already.
 
-## `default_access` — an estate-wide grant, written once
+## Written once at the org, landed on the rows at load
 
-Where an organization grants the same teams on nearly every repository,
-`default_access` says it at the org and each row inherits it:
+Four things an estate would otherwise write per row are written once at
+the org. Each resolves **at load** into exactly the rows it replaces, so
+resolution, entitlements, drift and preflight see one effective row —
+the structs they always saw — and an estate that adopts any of them
+changes nothing it applies. The resolved state before and after is the
+proof, and it still shows every grant, waiver and ruleset per repository.
+
+**`default_access`** is the grant nearly every repository gets:
 
 ```yaml
 orgs:
@@ -149,25 +155,18 @@ orgs:
 
 Silence inherits; an **explicit empty list** opts out. The asymmetry is
 the feature — a row that means "no grants" has to say so, so it reads as
-a decision rather than a forgotten key. Inheritance is applied at load,
-so resolution, entitlements and drift all see one effective row, and the
-resolved state still shows every grant per repository.
-
-## Said once — named tag rulesets, waivers by reason, team defaults
-
-Three more places where an estate used to write one decision many
-times. Each resolves **at load** into exactly the rows it replaces, so
-the engine, drift and preflight see the structs they always saw, and an
-estate that adopts them changes nothing it applies — the resolved state
-before and after is the proof.
+a decision rather than a forgotten key.
 
 **A named tag ruleset** is a body under the org's `tag_rulesets:`, keyed
 by the ruleset's display name; a row's `tag_rulesets:` list then names
-it. A row may still write a one-off body, but not under a name the org
-defines — two bodies for one name is how they disagree. The key *is* the
-name: a row referencing `release-tags` renders a ruleset called
-`release-tags`, which matters because the engine keys the live resource
-on repo + name, so renaming is a replacement with an unprotected window.
+it. The key *is* the name: a row referencing `release-tags` renders a
+ruleset called `release-tags`, which matters because the engine keys the
+live resource on repo + name, so renaming is a replacement with an
+unprotected window. A row may still write a one-off body — even under a
+name the org defines, when its rule deliberately differs, since a forced
+rename would replace the live ruleset. What it may not write is a COPY:
+a body identical to the org's under the same name is refused, with the
+reference as the fix.
 
 ```yaml
 orgs:
