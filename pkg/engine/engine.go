@@ -1145,26 +1145,16 @@ func deployReviewGate(
 }
 
 // reviewGate is the ruleset a resolved repo's review value asks for, or
-// nil where it asks for none. Split from deployReviewGate so the
-// decision is testable without a Pulumi context: what this returns is
-// the whole of the review mechanics.
+// nil where it asks for none.
+//
+// The decision MOVED to registry.ReviewGate on 2026-09-24 and this is
+// now a one-line delegation, deliberately kept rather than inlined at
+// the call site so the engine still reads as "gate := reviewGate(r)".
+// It moved because the drift check needs the same answer, and while
+// only the engine knew it, every synthesised ruleset in the estate
+// looked undeclared to `github-drift`.
 func reviewGate(r registry.Resolved) *registry.BranchRuleset {
-	if r.Review != registry.ReviewRequired {
-		return nil
-	}
-
-	gate := &registry.BranchRuleset{
-		Name:              registry.ReviewRulesetName,
-		Pattern:           defaultBranchRef,
-		RequiredApprovals: 1,
-		BypassOrgAdmins:   true,
-	}
-
-	if !r.Protection.Enabled {
-		gate.RequiredChecks = r.Protection.RequiredChecks
-	}
-
-	return gate
+	return registry.ReviewGate(r)
 }
 
 func deployTeamGrants(

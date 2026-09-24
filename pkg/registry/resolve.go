@@ -456,3 +456,45 @@ func (c *Config) ResolveEntitlementScope(login string, s *EntitlementScope) []st
 
 	return sortedKeys(set)
 }
+
+// DefaultBranchRef is the ruleset ref pattern meaning "whatever the
+// default branch is". GitHub resolves it server side, so a repository
+// that renames its default branch keeps its rules.
+const DefaultBranchRef = "~DEFAULT_BRANCH"
+
+// ReviewGate is the ruleset a resolved repo's `review` value asks for,
+// or nil where it asks for none.
+//
+// It lives HERE, beside ReviewRulesetName, rather than in the engine
+// that deploys it, because "review: required means a pr-approval
+// ruleset with one approval and an org-admin bypass" is a fact about
+// this vocabulary and not about Pulumi. Two things need it and must not
+// disagree: the engine, which creates the ruleset, and the drift check,
+// which has to recognise it as declared.
+//
+// That disagreement was not hypothetical. Until 2026-09-24 only the
+// engine knew, so `github-drift` reported the synthesised ruleset as
+// "live but undeclared" for EVERY `review: required` repository -- 35 of
+// them on truvity. The check consequently always exited non-zero, could
+// gate nothing, and a real drift (an org variable naming a module proxy
+// that had been deleted) sat unread among the noise for a day.
+func ReviewGate(r Resolved) *BranchRuleset {
+	if r.Review != ReviewRequired {
+		return nil
+	}
+
+	gate := &BranchRuleset{
+		Name:              ReviewRulesetName,
+		Pattern:           DefaultBranchRef,
+		RequiredApprovals: 1,
+		BypassOrgAdmins:   true,
+	}
+
+	// Where classic protection is off, the ruleset is the only thing
+	// left to carry the required checks, so it carries them.
+	if !r.Protection.Enabled {
+		gate.RequiredChecks = r.Protection.RequiredChecks
+	}
+
+	return gate
+}
