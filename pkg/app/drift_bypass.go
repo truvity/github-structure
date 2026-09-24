@@ -46,6 +46,16 @@ type (
 			ActorID   int64  `json:"actor_id"`
 			ActorType string `json:"actor_type"`
 		} `json:"bypass_actors"`
+		// The approval count, so the review gate is compared on what it
+		// ENFORCES and not merely on existing. A ruleset edited by hand
+		// from one approval to none is otherwise invisible: the actor
+		// set is untouched and the ruleset is still there.
+		Rules []struct {
+			Type       string `json:"type"`
+			Parameters struct {
+				RequiredApprovingReviewCount *int `json:"required_approving_review_count"`
+			} `json:"parameters"`
+		} `json:"rules"`
 	}
 )
 
@@ -88,7 +98,7 @@ func CheckBypassSurfaces(ctx context.Context, org string, cfg *registry.Config) 
 
 		drifts = append(drifts, d...)
 
-		d, err = checkRulesetActors(ctx, org, name, repo, installed, teamIDs)
+		d, err = checkRulesetActors(ctx, org, name, repo, want, installed, teamIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -141,11 +151,14 @@ func checkRulesetActors(
 	org string,
 	name string,
 	repo *registry.Repo,
+	resolved registry.Resolved,
 	installed registry.InstalledApps,
 	teamIDs map[string]int64,
 ) ([]Drift, error) {
 	// Declared expectation per ruleset name.
 	wantActors := map[string][]string{}
+	// Declared approval counts, for the rulesets that state one.
+	wantApprovals := map[string]int{}
 
 	for _, rs := range repo.TagRulesets {
 		// The registry names its bypass Apps; GitHub reports database
@@ -160,13 +173,33 @@ func checkRulesetActors(
 		wantActors[rs.Name] = declaredTagActors(ctx, org, rs, appIDs, teamIDs)
 	}
 
-	for _, rs := range repo.BranchRulesets {
+	branch := repo.BranchRulesets
+
+	// The ruleset `review: required` synthesises is DECLARED, even
+	// though no row in the registry spells it out -- the engine creates
+	// it at deploy from the same resolved value this reads. Without
+	// this, every such repository reported its own gate as an
+	// undeclared ruleset, which is how this check came to always exit
+	// non-zero and be unreadable.
+	//
+	// Appended rather than merged: a row that spells out `pr-approval`
+	// by hand keeps its own expectation, and the loop below lets the
+	// later entry win, so an explicit declaration still overrides.
+	if gate := registry.ReviewGate(resolved); gate != nil {
+		branch = append(append([]*registry.BranchRuleset{}, gate), branch...)
+	}
+
+	for _, rs := range branch {
 		appIDs, err := installed.BypassAppIDs(rs.BypassApps)
 		if err != nil {
 			return nil, fmt.Errorf("repo %s branch ruleset %s: %w", name, rs.Name, err)
 		}
 
 		wantActors[rs.Name] = declaredBranchActors(rs, appIDs)
+
+		if rs.RequiredApprovals > 0 {
+			wantApprovals[rs.Name] = rs.RequiredApprovals
+		}
 	}
 
 	var live []liveRuleset
@@ -211,6 +244,25 @@ func checkRulesetActors(
 
 		drifts = append(drifts,
 			compareBypassSets("repo "+name+" ruleset "+rs.Name, "bypass actors", want, got)...)
+
+		if n, stated := wantApprovals[rs.Name]; stated {
+			live := 0
+
+			for _, rule := range detail.Rules {
+				if rule.Type == "pull_request" && rule.Parameters.RequiredApprovingReviewCount != nil {
+					live = *rule.Parameters.RequiredApprovingReviewCount
+				}
+			}
+
+			if live != n {
+				drifts = append(drifts, Drift{
+					Subject: "repo " + name + " ruleset " + rs.Name,
+					Field:   "required approvals",
+					Want:    strconv.Itoa(n),
+					Got:     strconv.Itoa(live),
+				})
+			}
+		}
 	}
 
 	for rsName := range wantActors {
