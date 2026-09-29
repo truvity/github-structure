@@ -24,7 +24,8 @@ Part of a documentation triangle: this repo covers what a repository
 *is*; [ci-workflows](https://github.com/truvity/ci-workflows) covers
 what it *does* (see its `docs/estate-lifecycle.md` for the end-to-end
 path); [ci-plane](https://github.com/truvity/ci-plane) covers where CI
-*runs* and the artifact doctrine (`docs/normalization.md`).
+*runs* and the artifact doctrine (`docs/normalization.md`). All three
+components are held to the [component contract](https://github.com/truvity/policy/blob/master/docs/contracts/component.md).
 
 ## The three ideas
 
@@ -74,6 +75,25 @@ Run `preflight` against the stack's `pulumi preview` before every apply
 never reaches Pulumi), and validate applies with `pulumi preview
 --refresh` afterwards.
 
+## Consumers
+
+Imported as a Go library by:
+
+- **truvity/gitops**: uses the registry, engine, preflight and app packages
+  to manage the production organization's structure
+- **opwerm/nexus**: uses the registry, engine, preflight and app packages
+  to manage the per-team organization's structure
+
+Each estate maintains its own registry and stack but uses the shared
+library.
+
+## Neighbours
+
+- **ci-workflows**: defines the estate's component contract and CI discipline
+- **access-roster**: maintains the roster of people and groups; the registry
+  must refer to teams that access-roster can reconcile (teams are listed but
+  not created here)
+
 ## Documentation
 
 - [docs/doctrine.md](docs/doctrine.md) — the registry model: presets as
@@ -91,6 +111,12 @@ never reaches Pulumi), and validate applies with `pulumi preview
 texts, credential paths — stays in your (private) estate; this library
 carries the schema, the engine and the guards. `hack/leak-canary.sh`
 enforces it in CI, because public history cannot be unpublished.
+
+## Status
+
+Used in production by two organizations. The packages are stable: the schema
+converges on completeness, and the engine and guards are battle-tested
+against the actual incidents that shaped them.
 
 ## Licence
 

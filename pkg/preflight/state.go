@@ -138,7 +138,7 @@ func shortType(typ string) string {
 // checkRobotTeams fails when a team that no roster can refill holds
 // repository grants but has no members.
 //
-// The roster syncs `team-<x>` from `team-<x>@truvity.com` and the
+// The roster syncs `team-<x>` from `team-<x>@example.com` and the
 // partner-* families from their own directories. Everything else — the
 // robots, `ci-cd` above all — is populated by hand exactly once, so a team
 // that loses its members stays lost. That asymmetry is why an org-wide
