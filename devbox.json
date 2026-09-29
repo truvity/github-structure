@@ -2,11 +2,11 @@
   "packages": {
     "go": "1.27.0",
     "golangci-lint": "2.13.1",
-    "gopls": "latest",
-    "goreleaser": "latest",
+    "gopls": "0.23.0",
+    "goreleaser": "2.17.1",
     "govulncheck": "1.7.0",
-    "just": "latest",
-    "just-lsp": "latest"
+    "just": "1.58.0",
+    "just-lsp": "0.6.2"
   },
   "env": {
     "CGO_ENABLED": "0"
