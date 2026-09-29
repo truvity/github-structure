@@ -1,5 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Overrides beyond the shared preset: OSV vulnerability alerts, the `dependencies` label, PR automerge and lockfile maintenance, package rules that group and automerge non-major updates while leaving the go directive to devbox-update, vulnerability-alert labelling and automerge, and strict constraints filtering.",
   "extends": [
     "github>truvity/ci-workflows"
   ],

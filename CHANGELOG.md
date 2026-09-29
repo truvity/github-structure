@@ -48,7 +48,7 @@ taking a new one.
   each thing in one place: the *why* in doctrine, the schema in
   registry, the guards and their incidents in safety.
 
-## 0.10.0 — 2026-09-21
+## v0.10.0 — 2026-09-21
 
 ### Added
 
@@ -78,7 +78,7 @@ taking a new one.
   `default_access` naming an undeclared bundle fails the load even if no
   row inherits it today.
 
-## 0.9.0 — 2026-09-21
+## v0.9.0 — 2026-09-21
 
 ### Changed
 

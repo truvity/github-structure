@@ -27,7 +27,17 @@ path); [ci-plane](https://github.com/truvity/ci-plane) covers where CI
 *runs* and the artifact doctrine (`docs/normalization.md`). All three
 components are held to the [component contract](https://github.com/truvity/policy/blob/master/docs/contracts/component.md).
 
-## The three ideas
+## Who it is for
+
+Teams that run one or more GitHub organizations as Pulumi-managed
+infrastructure and want the org's teams, repositories, branch protection,
+rulesets and Actions policy declared in one registry file instead of
+clicked through settings pages, one repository at a time. It is a Go
+library, not a service: you write the Pulumi program for your estate and
+import these packages; there is no bundled registry file to run against —
+bring your own `orgs:` YAML.
+
+## The model
 
 **1. Profiles, and overrides that must explain themselves.** Every
 repository points at exactly one settings profile (`public`, `private`,
@@ -53,7 +63,11 @@ really means it can still act, but never by accident. See
 [docs/safety.md](docs/safety.md) for each guard and the incident that
 earned it.
 
-## Quickstart
+## Install and a worked example
+
+```sh
+go get github.com/truvity/github-structure@v0.12.2
+```
 
 ```go
 //go:embed github.yaml
@@ -117,6 +131,32 @@ enforces it in CI, because public history cannot be unpublished.
 Used in production by two organizations. The packages are stable: the schema
 converges on completeness, and the engine and guards are battle-tested
 against the actual incidents that shaped them.
+
+## Development
+
+The toolchain (Go, `golangci-lint`, `goreleaser`, `govulncheck`, `just`) is
+pinned in `devbox.json`; `devbox shell` (or direnv, on `cd` into the repo)
+puts it on `PATH`. `just --list` shows every recipe; `just check` runs what
+CI runs on a pull request — `build`, `test`, `lint`, `leak-canary` — plus
+`vuln`, which CI otherwise runs on its own daily schedule so a new
+advisory never turns a PR red.
+
+## Releasing
+
+A release is a `v*` git tag. `.github/workflows/release.yaml` triggers on
+that tag and calls the shared `release-public.yaml` workflow
+(truvity/ci-workflows), which runs `goreleaser`; `.goreleaser.yaml` sets
+`skip: true` on builds, since this is a library, so the only output is a
+GitHub Release whose changelog is generated from the commits since the
+last tag (conventional-commit prefixes `chore`, `ci`, `docs` and `test`
+are excluded). The Go module itself is versioned by the tag; nothing else
+is published.
+
+Most tags are cut automatically: `.github/workflows/auto-release.yaml`
+runs on every push to `master`, gated on the org variables `AUTO_RELEASE`
+and `ACCESS_ROSTER_ISSUER` both being set (they are, for this repository).
+A push whose merged PR carries the `security` label releases immediately;
+every other push is picked up by the Monday cron that follows.
 
 ## Licence
 
