@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	teamURN  = "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-ci-cd"
-	teamURN2 = "urn:pulumi:truvity::nexus-github::github:index/team:Team::team-dms"
-	repoURN  = "urn:pulumi:truvity::nexus-github::github:index/repository:Repository::repo-bar"
+	teamURN  = "urn:pulumi:example::example-github::github:index/team:Team::team-ci-cd"
+	teamURN2 = "urn:pulumi:example::example-github::github:index/team:Team::team-zeta"
+	repoURN  = "urn:pulumi:example::example-github::github:index/repository:Repository::repo-alpha"
 )
 
 // preEvent builds the one event shape the collector reads.
@@ -89,7 +89,7 @@ func TestCollectReplacesCatchesRepositoryReplace(t *testing.T) {
 // The guard stays narrow enough to be believed: resources the stack fully
 // owns are none of its business.
 func TestCollectReplacesIgnoresUnguardedTypes(t *testing.T) {
-	const urn = "urn:pulumi:truvity::nexus-github::github:index/actionsRepositoryPermissions:ActionsRepositoryPermissions::actions-bar"
+	const urn = "urn:pulumi:example::example-github::github:index/actionsRepositoryPermissions:ActionsRepositoryPermissions::actions-bar"
 
 	got := drain(t, preEvent(urn, "github:index/actionsRepositoryPermissions:ActionsRepositoryPermissions", "replace"))
 
@@ -110,7 +110,7 @@ func TestCollectReplacesSortsAndSeparatesResources(t *testing.T) {
 // Branch protection is guarded for the mirror-image reason: the delete half
 // leaves a branch unprotected and the next diff reads clean.
 func TestCollectReplacesCatchesBranchProtection(t *testing.T) {
-	const urn = "urn:pulumi:truvity::nexus-github::github:index/branchProtection:BranchProtection::prot-bar"
+	const urn = "urn:pulumi:example::example-github::github:index/branchProtection:BranchProtection::prot-alpha"
 
 	got := drain(t, preEvent(urn, "github:index/branchProtection:BranchProtection", "delete-replaced"))
 
