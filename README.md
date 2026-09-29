@@ -81,7 +81,7 @@ Imported as a Go library by:
 
 - **truvity/gitops**: uses the registry, engine, preflight and app packages
   to manage the production organization's structure
-- **opwerm/nexus**: uses the registry, engine, preflight and app packages
+- **A second, non-AWS estate**: uses the registry, engine, preflight and app packages
   to manage the per-team organization's structure
 
 Each estate maintains its own registry and stack but uses the shared
