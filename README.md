@@ -95,8 +95,9 @@ Imported as a Go library by:
 
 - **truvity/gitops**: uses the registry, engine, preflight and app packages
   to manage the production organization's structure
-- **A second, non-AWS estate**: uses the registry, engine, preflight and app packages
-  to manage the per-team organization's structure
+- **A second, non-AWS estate**: uses the registry, engine and app packages
+  to manage the per-team organization's structure (it does not import
+  `preflight`)
 
 Each estate maintains its own registry and stack but uses the shared
 library.
