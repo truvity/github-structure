@@ -37,7 +37,7 @@ func TestInspectTeamImportIDsCatchesTheRealPreIncidentState(t *testing.T) {
 func TestInspectTeamImportIDsAcceptsMatchingImportIDs(t *testing.T) {
 	raw := stateWith(t,
 		teamRes("team-ci-cd", "18889468", "ci-cd"),
-		teamRes("team-team-dms", "18889461", "team-dms"),
+		teamRes("team-team-zeta", "18889461", "team-zeta"),
 	)
 
 	problems, err := inspectTeamImportIDs(raw)
@@ -65,7 +65,7 @@ func TestInspectTeamImportIDsCatchesNumericImportID(t *testing.T) {
 // two repos adopted on 2026-08-11 are in exactly this shape.
 func TestInspectTeamImportIDsAcceptsRepoWithoutImportIDMatchingItsID(t *testing.T) {
 	raw := stateWith(t, map[string]any{
-		"urn":    "urn:pulumi:truvity::nexus-github::github:index/repository:Repository::repo-json",
+		"urn":    "urn:pulumi:example::example-github::github:index/repository:Repository::repo-json",
 		"type":   "github:index/repository:Repository",
 		"id":     "json",
 		"custom": true,
@@ -80,7 +80,7 @@ func TestInspectTeamImportIDsAcceptsRepoWithoutImportIDMatchingItsID(t *testing.
 // A repository whose id has drifted from its declared name IS the bomb.
 func TestInspectTeamImportIDsCatchesRepoIDMismatch(t *testing.T) {
 	raw := stateWith(t, map[string]any{
-		"urn":    "urn:pulumi:truvity::nexus-github::github:index/repository:Repository::repo-json",
+		"urn":    "urn:pulumi:example::example-github::github:index/repository:Repository::repo-json",
 		"type":   "github:index/repository:Repository",
 		"id":     "some-other-repo",
 		"custom": true,
@@ -96,7 +96,7 @@ func TestInspectTeamImportIDsCatchesRepoIDMismatch(t *testing.T) {
 // Types the engine never imports (branch protection) are not judged.
 func TestInspectTeamImportIDsIgnoresUnimportedTypes(t *testing.T) {
 	raw := stateWith(t, map[string]any{
-		"urn":    "urn:pulumi:truvity::nexus-github::github:index/branchProtection:BranchProtection::protection-bar",
+		"urn":    "urn:pulumi:example::example-github::github:index/branchProtection:BranchProtection::protection-alpha",
 		"type":   "github:index/branchProtection:BranchProtection",
 		"id":     "whatever",
 		"custom": true,
@@ -117,7 +117,7 @@ func TestInspectTeamImportIDsRejectsGarbage(t *testing.T) {
 // in the permissive direction is what let ci-cd sit empty for four days.
 func teamRes(name, id, importID string) map[string]any {
 	r := map[string]any{
-		"urn":    "urn:pulumi:truvity::nexus-github::github:index/team:Team::" + name,
+		"urn":    "urn:pulumi:example::example-github::github:index/team:Team::" + name,
 		"type":   "github:index/team:Team",
 		"id":     id,
 		"custom": true,
