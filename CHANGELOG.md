@@ -4,7 +4,11 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
-## Unreleased
+## v0.12.2
+
+- Leak hygiene: the preflight test fixtures and Go tests use neutral Pulumi project, team and repository names.
+- README gains `Status`, `Consumers` and `Neighbours` and links the policy component contract; `renovate.json` extends the shared preset; ci-workflows pins moved to v3.13.1.
+- The entries below accumulated under an `Unreleased` heading and shipped across v0.11.0 to v0.12.1; they are filed here so every tag has a heading.
 
 ### Added
 
