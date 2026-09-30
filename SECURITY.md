@@ -13,16 +13,16 @@ Only the latest release is supported with security updates.
 
 ## What is in scope
 
-This repository publishes contracts, schemas, small configuration loaders and
-a worked example. Reports that matter most:
+This repository publishes:
 
-- A loader that accepts a configuration it should refuse, or that reports a
-  secret's value in an error or a log line.
-- A contract or a schema whose defaults are unsafe for anyone who follows
-  them.
-- Anything in the example that would be a vulnerability in a real service,
-  since the example is what people copy.
+- The Go packages `pkg/registry`, `pkg/engine`, `pkg/preflight` and `pkg/app`.
+- The documentation, where it tells an adopter to configure an organisation in an unsafe way.
 
-This repository holds no credentials and its CI runs on hosted runners with
-no access to any private infrastructure. A finding that depends on a
-particular deployment belongs with that deployment's owner.
+Reports that matter most:
+
+- A registry or preflight that accepts a configuration it should refuse: a branch protection or ruleset that silently does less than it says, a bypass actor that is wider than declared, a plan that destroys something it promised to guard.
+- `pkg/app` leaking an App key, installation token or JWT into a log line, an error or a returned value, or acting on an installation other than the one named.
+- A default that weakens what the registry enforces on an organisation.
+
+A finding that depends on how a particular deployment uses this repository
+belongs with that deployment's owner.
