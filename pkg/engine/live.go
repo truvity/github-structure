@@ -62,8 +62,8 @@ type liveState struct { //nolint:grouper // one type in this file; a group of on
 // no commits yet: push at least an empty root commit before the rule can
 // be created.
 //
-// Both are one extra apply, not a correctness problem — but at INF-473's
-// ~70 repositories they are the difference between "it worked" and "it
+// Both are one extra apply, not a correctness problem — but at a second
+// org's ~70 repositories they are the difference between "it worked" and "it
 // half-worked twice", so budget for repeat applies there.
 func readLiveState(
 	ctx context.Context,

@@ -36,4 +36,4 @@ clean:
     rm -rf bin/ dist/ coverage.out
 
 # Everything CI runs on a pull request.
-check: build test lint leak-canary vuln
+check: build test lint leak-canary

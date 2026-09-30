@@ -302,7 +302,7 @@ func compareOrgVariables(want map[string]*registry.OrgVariable, live map[string]
 // that the registry changed; it cannot notice a repository that was
 // created in GitHub and never added — the count simply stays right,
 // because the missing row was never in it. That is exactly how `gemaal`
-// went unmanaged (INF-552): active, public, running shared CI, and
+// went unmanaged: active, public, running shared CI, and
 // sitting on `allow_auto_merge: false` while every profiled repo had it
 // true, so Renovate's auto-merge request was refused and nothing went
 // red for days.

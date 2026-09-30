@@ -8,8 +8,8 @@
 //   - repository settings, branch protection, Actions permissions;
 //   - team→repository permissions.
 //
-// It does NOT own team MEMBERSHIP: that belongs to the roster service
-// (INF-484/INF-487). Adding membership resources here would put two
+// It does NOT own team MEMBERSHIP: that belongs to the roster service.
+// Adding membership resources here would put two
 // systems in a reconciliation fight over the same objects.
 //
 // It also does not own App creation, installation, or App permissions:
@@ -25,7 +25,7 @@
 // each resource is imported when live and created when not. So the first
 // preview is a ZERO DIFF against reality, and a destroy/recreate of a
 // live repository — the failure mode this program exists to prevent —
-// cannot happen by accident. The same code stamps a fresh org (INF-473)
+// cannot happen by accident. The same code stamps a fresh org
 // with no flags to flip.
 //
 // # Branch protection is the exception, and why
@@ -75,7 +75,7 @@ const (
 )
 
 // Deploy provisions one organization's structure. The stack name IS the
-// org login, so a second org (INF-473) is a new stack file plus a
+// org login, so a second org is a new stack file plus a
 // cfg/github.yaml key — never new code.
 // Deploy declares one organization's whole structure — settings, Actions
 // policy, owners, teams, repositories with their protection and rulesets
@@ -396,15 +396,15 @@ func deployTeams(
 			// carried protect:true in state, and an `up` applied
 			// `replace: 13` anyway. Their old numeric IDs are 404 today.
 			// A replace deletes the team and makes a new one with the
-			// same slug; membership is the roster service's (INF-484) and
+			// same slug; membership is the roster service's and
 			// lives nowhere in this state, so Pulumi dropped every member,
 			// could not restore them, and reported nothing lost. The
 			// roster refilled the human teams within a sync — `ci-cd`,
 			// which no roster refills, stayed empty and took org-wide CI
 			// down for four days.
 			//
-			// What actually guards this is `just github-preflight`
-			// (INF-530), which refuses a plan containing such a replace.
+			// What actually guards this is `just github-preflight`,
+			// which refuses a plan containing such a replace.
 			// Run `just github-deploy`, never a bare `pulumi up`.
 			pulumi.Protect(true),
 		}
@@ -433,7 +433,7 @@ func deployTeams(
 		// every member was dropped silently.
 		//
 		// Before touching this line, run `just github-preflight`, which
-		// refuses any plan that would replace a team (INF-530).
+		// refuses any plan that would replace a team.
 		if _, exists := live.teamID(slug); exists {
 			opts = append(opts, pulumi.Import(pulumi.ID(slug)))
 		}
@@ -732,7 +732,7 @@ func deployRepo(
 		// repository is a delete-and-recreate that takes the history with
 		// it — see the team block above for the 2026-08-07 proof that
 		// protect:true does not hold against one. `just github-preflight`
-		// is what refuses that plan (INF-530).
+		// is what refuses that plan.
 		pulumi.Protect(true),
 	}
 

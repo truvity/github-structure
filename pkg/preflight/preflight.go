@@ -27,7 +27,7 @@ import (
 // not know it lost.
 //
 // Teams are the whole reason this command exists. Their membership is the
-// roster's (INF-484) and appears nowhere in this state; a replace deletes
+// roster's and appears nowhere in this state; a replace deletes
 // the team and creates a new one with the same slug, so every diff after
 // it reads clean while the members are simply gone. That is not
 // hypothetical — see the incident note on replaceOps below.
@@ -323,7 +323,7 @@ func writeReplaces(b *strings.Builder, org string, replaces []plannedReplace) {
 	b.WriteString("     property that requires replacement — that is a phantom, not a change.\n")
 	b.WriteString("  2. Check whether the declared pulumi.Import ID changed, or whether the\n")
 	b.WriteString("     resource sits in state with no importID. Either makes Pulumi replace\n")
-	b.WriteString("     rather than adopt (INF-530).\n")
+	b.WriteString("     rather than adopt.\n")
 	b.WriteString("  3. protect:true will NOT save you — it did not on 2026-08-07.\n")
 }
 

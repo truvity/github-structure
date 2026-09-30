@@ -518,7 +518,7 @@ func TestBranchRulesetRejectsNoBypassAtAll(t *testing.T) {
 	assert.Contains(t, err.Error(), "a bypass is required")
 }
 
-// ── check waivers (INF-410) ────────────────────────────────────────────
+// ── check waivers ────────────────────────────────────────────
 
 // The profile keeps stating the intent; the waiver drops it for one
 // repo. That is the whole point — the exception stays visible.
