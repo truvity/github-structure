@@ -339,7 +339,7 @@ settings:
 
 Why derived: a hand-kept list is the entitlement dead zone. Workflows on
 unentitled repos "skip cleanly" — renovate silently never ran on seven
-repos (INF-580, found twice: two repos 2026-08-25, seven more
+repos (found twice: two repos 2026-08-25, seven more
 2026-08-27) and nothing noticed, because a missing entitlement looks
 exactly like a quiet day. Under a derived rule, new repos matching the
 profile are entitled at birth by the next reconcile, and every hand

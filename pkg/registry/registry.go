@@ -12,7 +12,7 @@
 // organization's LIVE installations at deploy — see InstalledApps.
 //
 // Company-agnosticism is the design constraint. Profiles are top-level
-// and shared, so a second org (INF-473, the TP migration) is a new
+// and shared, so a second org is a new
 // `orgs:` key referencing the same `public`/`private` profiles — never
 // new code.
 package registry
@@ -186,8 +186,8 @@ type (
 		// does not evict them from the org (DowngradeOnDestroy).
 		Owners []string `yaml:"owners,omitempty"`
 		// Teams are the org's teams, keyed by slug. Membership is NOT
-		// modeled here — that is the roster service's territory
-		// (INF-484/INF-487); this engine owns structure only.
+		// modeled here — that is the roster service's territory;
+		// this engine owns structure only.
 		// DefaultAccess are the access bundles every repository in this
 		// org gets unless its row says otherwise. It exists because an
 		// estate-wide grant written per row is fifty copies of one
@@ -301,8 +301,8 @@ type (
 		SecretScanningForNewRepos            bool   `yaml:"secret_scanning_enabled_for_new_repositories"`
 		SecretScanningPushProtForNewRepos    bool   `yaml:"secret_scanning_push_protection_enabled_for_new_repositories"`
 		// Actions is the ORG-level Actions policy — the ceiling every
-		// repository's own policy sits under (INF-410's "Actions org
-		// permissions"). Readable only through the App: a human token
+		// repository's own policy sits under (the "Actions org
+		// permissions" setting). Readable only through the App: a human token
 		// with read:org gets 403.
 		Actions *OrgActions `yaml:"actions"`
 	}
@@ -325,7 +325,7 @@ type (
 		// hand or by the secrets-mirror, never through this registry.
 		// Declaring them exists for the scope: a selected-visibility
 		// secret whose repository list is hand-kept is the entitlement
-		// dead zone (INF-580 — renovate silently never ran on seven
+		// dead zone (renovate silently never ran on seven
 		// repos because nothing owned the list).
 		Secrets map[string]*OrgSecret `yaml:"secrets,omitempty"`
 	}
@@ -364,7 +364,7 @@ type (
 		Visibility string `yaml:"visibility,omitempty"`
 		// Scope declares the selected-repo membership (visibility
 		// `selected` only) — derived + explicit, reconciled by
-		// idempotent PUTs and drift-checked (INF-580).
+		// idempotent PUTs and drift-checked.
 		Scope *EntitlementScope `yaml:"scope,omitempty"`
 	}
 
@@ -448,7 +448,7 @@ type (
 		// yet therefore needs an explicit, per-repo escape — while the
 		// profile keeps stating the intent, so the exception is visible
 		// as an exception rather than as a profile that asks for
-		// nothing (INF-410).
+		// nothing.
 		//
 		// Lifting it is deleting one line. Waiving checks a profile does
 		// not require is rejected, so a waiver cannot outlive its cause.
@@ -471,7 +471,7 @@ type (
 		//
 		// This is what keeps a retirement expressible. Before it existed
 		// the only options were to leave a live row that 403s on every
-		// run — the trap that wedged the engine during the INF-512
+		// run — the trap that wedged the engine during an
 		// sdk-python adoption — or to drop the row and hand-archive,
 		// which puts the repo outside the registry and leaves a
 		// protected orphan in state. See
@@ -1742,7 +1742,7 @@ func isAllDigits(s string) bool {
 // protectionEnforcesAnything reports whether a rule actually restricts
 // anything at all. Blocking force pushes or deletions counts: a rule can
 // be meaningful without gating merges, which is exactly the shape a repo
-// lands in while its required checks are waived (INF-410).
+// lands in while its required checks are waived.
 func protectionEnforcesAnything(p ResolvedProtection) bool {
 	return len(p.RequiredChecks) > 0 ||
 		p.RequiredApprovals > 0 ||

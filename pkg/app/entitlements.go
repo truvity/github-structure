@@ -17,7 +17,7 @@ package app
 //     which is the key-custody problem the estate just retired; the
 //     rows exist so the scope has an owner.
 //
-// The motivating class (INF-580): renovate silently never ran on seven
+// The motivating class: renovate silently never ran on seven
 // repos because nothing owned the RENOVATE_* selected lists — workflows
 // "skip cleanly" when unentitled, which is the failure mode that looks
 // like success. Undeclared-but-live variables are the mirror of it and
@@ -448,7 +448,7 @@ func ReconcileOrgVariables(ctx context.Context, org string, cfg *registry.Config
 		case write.create:
 			// A `selected` variable created with no list is readable by
 			// nobody, and a workflow that cannot read it SKIPS rather
-			// than fails (INF-580). Refusing is the only outcome that
+			// than fails. Refusing is the only outcome that
 			// cannot be mistaken for success.
 			return nil, fmt.Errorf(
 				"variable %s is declared `selected` with no scope and does not exist live: "+

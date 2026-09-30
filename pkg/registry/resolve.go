@@ -425,7 +425,7 @@ func derefStrings(p *[]string) []string {
 // list it entitles within one org: every non-archived repo carrying
 // DerivePreset, plus the explicit additions, deduplicated. A nil scope
 // resolves to nil — "declared selected with no scope" is CheckOrgVariables'
-// pre-INF-580 behavior (visibility checked, membership not).
+// earlier behavior (visibility checked, membership not).
 func (c *Config) ResolveEntitlementScope(login string, s *EntitlementScope) []string {
 	if s == nil {
 		return nil
