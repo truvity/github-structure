@@ -20,6 +20,7 @@ package registry
 import (
 	"fmt"
 	"io/fs"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -399,6 +400,12 @@ type (
 		Access []string `yaml:"access,omitempty"`
 		// Description is the repo blurb; empty means unmanaged.
 		Description string `yaml:"description,omitempty"`
+		// Homepage is the repo's homepage URL, a per-repo fact like
+		// Description and so a row field, not a preset or override
+		// field. Empty (or absent) means the field is declared empty,
+		// exactly as before the field existed; otherwise an absolute
+		// https URL.
+		Homepage string `yaml:"homepage,omitempty"`
 		// Teams are grants ADDED to this repo's access bundles, or upgrades
 		// of one. Removal is expressed by not listing the bundle, which is
 		// the whole point of splitting access from presets: it used to be
@@ -1348,6 +1355,21 @@ func (o *Org) detectTeamCycles(login string) error {
 	return nil
 }
 
+// validateHomepage accepts empty (nothing declared) or an absolute
+// https URL with a host and no surrounding whitespace.
+func validateHomepage(v string) error {
+	if v == "" {
+		return nil
+	}
+
+	u, err := url.Parse(v)
+	if err != nil || u.Scheme != "https" || u.Host == "" || strings.TrimSpace(v) != v {
+		return fmt.Errorf("homepage %q must be an absolute https:// URL or empty", v)
+	}
+
+	return nil
+}
+
 func (c *Config) validateRepos(login string, org *Org) error {
 	for _, name := range org.SortedRepos() {
 		repo := org.Repos[name]
@@ -1366,6 +1388,10 @@ func (c *Config) validateRepos(login string, org *Org) error {
 
 		if repo.Overrides != nil && repo.Reason == "" {
 			return fmt.Errorf("org %q repo %q: overrides require a reason (which keep-or-fix decision made this deviation deliberate)", login, name)
+		}
+
+		if err := validateHomepage(repo.Homepage); err != nil {
+			return fmt.Errorf("org %q repo %q: %w", login, name, err)
 		}
 
 		if repo.Review != "" && !validReview[repo.Review] {

@@ -4,6 +4,14 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+Next version: v0.13.0 (new optional field).
+
+### Added
+
+- Repository rows take an optional `homepage:` (an absolute `https://` URL), written to the repository's homepage. It is a row field like `description`, not a preset or override field. Unset behaves exactly as before: nothing is declared. The resolved state carries `Homepage` only when set.
+
 ## v0.12.2
 
 - Leak hygiene: the preflight test fixtures and Go tests use neutral Pulumi project, team and repository names.

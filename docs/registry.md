@@ -64,6 +64,8 @@ orgs:
                                   # repos need a reviewed merge is a fact
                                   # about them, not a settings deviation.
         description: …            # optional; written to GitHub
+        homepage: https://…       # optional; absolute https URL, written
+                                  # to GitHub. Unset = empty, as before
         archived: true            # read-only rows: repo + nothing else
         checks_waived: >-         # free text, MUST carry its exit
           New repo, no CI yet. Exit: delete when ci.yaml reports

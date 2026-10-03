@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	registry "github.com/truvity/github-structure/pkg/registry"
 )
@@ -49,7 +50,7 @@ func TestRepoIgnoredFields(t *testing.T) {
 		"archived: everything but archived itself": {
 			repo: registry.Resolved{Visibility: "public", Archived: true},
 			wantContain: []string{
-				fieldAutoInit, "visibility", "description", "hasIssues", "hasWiki",
+				fieldAutoInit, "visibility", "description", "homepageUrl", "hasIssues", "hasWiki",
 				"hasProjects", "allowAutoMerge", "allowSquashMerge",
 				"allowMergeCommit", "allowRebaseMerge", "allowUpdateBranch",
 				"deleteBranchOnMerge", "allowForking",
@@ -143,4 +144,14 @@ func TestRepoArgsKeepsAllowForkingWhenPublic(t *testing.T) {
 	// field stays declared and its drift stays visible.
 	assert.NotNil(t, args.AllowForking,
 		"public repositories keep allowForking managed")
+}
+
+func TestRepoArgsHomepage(t *testing.T) {
+	t.Parallel()
+
+	unset := repoArgs("bar", registry.Resolved{Visibility: "public"})
+	assert.Nil(t, unset.HomepageUrl, "an unset homepage is not declared, as before the field existed")
+
+	set := repoArgs("bar", registry.Resolved{Visibility: "public", Homepage: "https://example.com/"})
+	require.NotNil(t, set.HomepageUrl)
 }

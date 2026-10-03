@@ -619,6 +619,7 @@ func repoIgnoredFields(r registry.Resolved) []string {
 		ignore = append(ignore,
 			"visibility",
 			"description",
+			"homepageUrl",
 			"hasIssues",
 			"hasWiki",
 			"hasProjects",
@@ -703,6 +704,12 @@ func repoArgs(name string, r registry.Resolved) *github.RepositoryArgs {
 
 	if r.Description != "" {
 		args.Description = pulumi.String(r.Description)
+	}
+
+	// Same shape as description: declared only when set, so an unset
+	// homepage behaves as it did before the field existed.
+	if r.Homepage != "" {
+		args.HomepageUrl = pulumi.String(r.Homepage)
 	}
 
 	return args

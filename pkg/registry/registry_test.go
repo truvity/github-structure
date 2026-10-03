@@ -1,6 +1,7 @@
 package registry_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -900,4 +901,51 @@ func TestDefaultAccessMustNameDeclaredBundles(t *testing.T) {
 	_, err := load(t, body)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nonesuch")
+}
+
+// ── homepage ───────────────────────────────────────────────────────────
+
+func TestHomepageResolvesFromRow(t *testing.T) {
+	body := strings.Replace(minimal, "        access: [managers]\n",
+		"        access: [managers]\n        homepage: https://example.com/\n", 1)
+
+	cfg, err := load(t, body)
+	require.NoError(t, err)
+
+	got, ok := cfg.ResolveRepo("acme", "widget")
+	require.True(t, ok)
+	assert.Equal(t, "https://example.com/", got.Homepage)
+}
+
+func TestHomepageUnsetResolvesEmptyAndIsOmittedFromJSON(t *testing.T) {
+	cfg, err := load(t, minimal)
+	require.NoError(t, err)
+
+	got, ok := cfg.ResolveRepo("acme", "widget")
+	require.True(t, ok)
+	assert.Empty(t, got.Homepage)
+
+	b, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "Homepage", "resolved dumps of estates without a homepage must not change")
+
+	b, err = json.Marshal(registry.Resolved{Homepage: "https://example.com/"})
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"Homepage":"https://example.com/"`)
+}
+
+func TestHomepageValidation(t *testing.T) {
+	for _, bad := range []string{"http://example.com", "example.com", "/path", "https://", "ftp://x.io", "https://a b.com", " https://example.com"} {
+		body := strings.Replace(minimal, "        access: [managers]\n",
+			"        access: [managers]\n        homepage: \""+bad+"\"\n", 1)
+
+		_, err := load(t, body)
+		require.Errorf(t, err, "%q must be rejected", bad)
+		assert.Contains(t, err.Error(), "homepage")
+	}
+
+	body := strings.Replace(minimal, "        access: [managers]\n",
+		"        access: [managers]\n        homepage: \"\"\n", 1)
+	_, err := load(t, body)
+	require.NoError(t, err, "empty is accepted")
 }
