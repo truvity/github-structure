@@ -6,7 +6,7 @@ taking a new one.
 
 ## Unreleased
 
-Next version: v0.13.0 (new optional field).
+## v0.13.0 — 2026-10-03
 
 ### Added
 
