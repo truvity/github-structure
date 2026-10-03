@@ -25,6 +25,11 @@ type (
 		DefaultBranch       string
 		Description         string
 
+		// Homepage is the row's homepage URL; empty is not written,
+		// as with Description. Omitted from JSON when empty so a
+		// resolved-state dump of an estate that sets none is unchanged.
+		Homepage string `json:",omitempty"`
+
 		// Archived is the repo row's own flag, never a profile's: a
 		// retirement is a fact about one repository, not a class of
 		// them. When set, every field above is inert — the engine
@@ -113,6 +118,7 @@ func (c *Config) Resolve(repo *Repo) Resolved {
 		HasDownloads:        derefBool(merged.HasDownloads),
 		DefaultBranch:       derefString(merged.DefaultBranch),
 		Description:         repo.Description,
+		Homepage:            repo.Homepage,
 		Archived:            repo.Archived,
 		Teams:               c.effectiveTeams(repo),
 		Review:              reviewOf(repo, preset),
