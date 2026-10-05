@@ -173,6 +173,12 @@ func checkRulesetActors(
 		wantActors[rs.Name] = declaredTagActors(ctx, org, rs, appIDs, teamIDs)
 	}
 
+	// workflow-only-tags is declared by the field, not by a row: its
+	// expected actor set is the pinned GitHub Actions integration.
+	if rs := registry.WorkflowOnlyTagsRulesetFor(repo.WorkflowOnlyTags); rs != nil {
+		wantActors[rs.Name] = declaredRenderedActors(rs)
+	}
+
 	branch := repo.BranchRulesets
 
 	// The ruleset `review: required` synthesises is DECLARED, even
@@ -332,6 +338,17 @@ func declaredTagActors(
 		}
 
 		actors = append(actors, "Team:"+strconv.FormatInt(id, 10))
+	}
+
+	return actors
+}
+
+// declaredRenderedActors is the expected actor set of a ruleset the
+// registry renders itself, in the live vocabulary (Type:id).
+func declaredRenderedActors(rs *registry.RenderedRuleset) []string {
+	actors := make([]string, 0, len(rs.BypassActors))
+	for _, a := range rs.BypassActors {
+		actors = append(actors, a.ActorType+":"+strconv.Itoa(a.ActorID))
 	}
 
 	return actors

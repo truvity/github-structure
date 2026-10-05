@@ -546,6 +546,10 @@ func deployRepos(
 				return fmt.Errorf("repo %s tag rulesets: %w", name, err)
 			}
 
+			if err := deployWorkflowOnlyTags(c, name, orgCfg.Repos[name].WorkflowOnlyTags, provider); err != nil {
+				return fmt.Errorf("repo %s workflow-only tags: %w", name, err)
+			}
+
 			if err := deployBranchRulesets(c, name, live.installedApps, orgCfg.Repos[name].BranchRulesets, provider); err != nil {
 				return fmt.Errorf("repo %s branch rulesets: %w", name, err)
 			}
@@ -1006,6 +1010,63 @@ func deployTagRulesets(
 		if err != nil {
 			return fmt.Errorf("ruleset %s: %w", rs.Name, err)
 		}
+	}
+
+	return nil
+}
+
+// deployWorkflowOnlyTags declares the one `workflow-only-tags` ruleset a
+// row's workflow_only_tags stands for: creation, update and deletion of
+// the matching tags, bypassed by the built-in GitHub Actions integration
+// and nobody else. Create-only, no import, like deployTagRulesets.
+//
+// The actor is a pinned constant, not resolved against installations:
+// the built-in integration is not an installation of the org.
+func deployWorkflowOnlyTags(
+	c *pulumi.Context,
+	repoName string,
+	patterns []string,
+	provider *github.Provider,
+) error {
+	rs := registry.WorkflowOnlyTagsRulesetFor(patterns)
+	if rs == nil {
+		return nil
+	}
+
+	includes := make(pulumi.StringArray, 0, len(rs.Include))
+	for _, p := range rs.Include {
+		includes = append(includes, pulumi.String(p))
+	}
+
+	actors := make(github.RepositoryRulesetBypassActorArray, 0, len(rs.BypassActors))
+	for _, a := range rs.BypassActors {
+		actors = append(actors, github.RepositoryRulesetBypassActorArgs{
+			ActorId:    pulumi.Int(a.ActorID),
+			ActorType:  pulumi.String(a.ActorType),
+			BypassMode: pulumi.String(a.BypassMode),
+		})
+	}
+
+	_, err := github.NewRepositoryRuleset(c, "ruleset-"+repoName+"-"+rs.Name, &github.RepositoryRulesetArgs{
+		Name:        pulumi.String(rs.Name),
+		Repository:  pulumi.String(repoName),
+		Target:      pulumi.String(rs.Target),
+		Enforcement: pulumi.String(rs.Enforcement),
+		Conditions: &github.RepositoryRulesetConditionsArgs{
+			RefName: &github.RepositoryRulesetConditionsRefNameArgs{
+				Includes: includes,
+				Excludes: pulumi.StringArray{},
+			},
+		},
+		Rules: &github.RepositoryRulesetRulesArgs{
+			Creation: pulumi.Bool(true),
+			Update:   pulumi.Bool(true),
+			Deletion: pulumi.Bool(true),
+		},
+		BypassActors: actors,
+	}, pulumi.Provider(provider))
+	if err != nil {
+		return fmt.Errorf("ruleset %s: %w", rs.Name, err)
 	}
 
 	return nil
