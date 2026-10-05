@@ -343,6 +343,32 @@ func TestBranchRulesetAcceptsChecksOnlyWithBypass(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// A merge queue rides a branch ruleset; a bad method fails at load, and a
+// ruleset whose only rule is the queue is not "enforcing nothing".
+func TestBranchRulesetMergeQueue(t *testing.T) {
+	row := func(queue string) string {
+		return strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: master-queue
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 0
+            required_checks: [check]
+            bypass_org_admins: true
+`+queue, 1)
+	}
+
+	c, err := load(t, row("            merge_queue: {merge_method: SQUASH, max_entries_to_build: 3}\n"))
+	require.NoError(t, err)
+
+	q := c.Orgs["acme"].Repos["widget"].BranchRulesets[0].MergeQueue
+	require.NotNil(t, q)
+	assert.Equal(t, "SQUASH", q.MergeMethod)
+	assert.Equal(t, 3, q.MaxEntriesToBuild)
+
+	_, err = load(t, row("            merge_queue: {merge_method: FAST}\n"))
+	require.ErrorContains(t, err, "merge_method")
+}
+
 // ── bypass App names ───────────────────────────────────────────────────
 
 // A ruleset names an App; the id comes from the organization's LIVE
