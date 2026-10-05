@@ -10,6 +10,15 @@ taking a new one.
 
 ### Added
 
+- **`merge_queue:` on a branch ruleset.** Adds the "require merge queue"
+  rule (`merge_method`, `grouping_strategy`, `max_entries_to_build`,
+  `max_entries_to_merge`, `min_entries_to_merge`,
+  `min_entries_to_merge_wait_minutes`, `check_response_timeout_minutes`;
+  all optional, GitHub's defaults except `merge_method`, which defaults
+  to SQUASH). A ruleset may now carry only the queue. Bypass actors still
+  skip it. Required status checks still apply to the merge group, so the
+  repository's workflows need a `merge_group:` trigger.
+
 - Repository rows take an optional `workflow_only_tags:` list of relative tag patterns (`deploy/pulumi/v*`). It renders one tag ruleset, `workflow-only-tags` (creation, update, deletion), whose only bypass actor is the built-in GitHub Actions integration (pinned App id 15368), so only the repository's own release workflow can write those tags. **The workflow must create them with `GITHUB_TOKEN`**: an App token or a personal access token is refused. The ruleset is exempt from the bypass-team requirement (its bypass is the workflow). The loader refuses empty lists, duplicates, patterns that could match a root release tag (`v*`, `*`), overlap with the repository's `tag_rulesets`, and a `tag_rulesets` row named `workflow-only-tags`. The engine declares the ruleset and the drift check expects its bypass set to be exactly the integration. Unset behaves exactly as before.
 
 ## v0.13.1 — 2026-10-05

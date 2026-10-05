@@ -1150,6 +1150,21 @@ func deployBranchRulesets(
 			}
 		}
 
+		// The merge queue rule. Every field is written, defaults filled
+		// in here, so the ruleset matches what the API reads back and
+		// never diffs forever.
+		if q := rs.MergeQueue; q != nil {
+			rules.MergeQueue = &github.RepositoryRulesetRulesMergeQueueArgs{
+				MergeMethod:                  pulumi.String(orString(q.MergeMethod, "SQUASH")),
+				GroupingStrategy:             pulumi.String(orString(q.GroupingStrategy, "ALLGREEN")),
+				MaxEntriesToBuild:            pulumi.Int(orInt(q.MaxEntriesToBuild, 5)),
+				MaxEntriesToMerge:            pulumi.Int(orInt(q.MaxEntriesToMerge, 5)),
+				MinEntriesToMerge:            pulumi.Int(orInt(q.MinEntriesToMerge, 1)),
+				MinEntriesToMergeWaitMinutes: pulumi.Int(orInt(q.MinEntriesToMergeWaitMinutes, 5)),
+				CheckResponseTimeoutMinutes:  pulumi.Int(orInt(q.CheckResponseTimeoutMinutes, 60)),
+			}
+		}
+
 		_, err = github.NewRepositoryRuleset(c, "ruleset-"+repoName+"-"+rs.Name, &github.RepositoryRulesetArgs{
 			Name:        pulumi.String(rs.Name),
 			Repository:  pulumi.String(repoName),
@@ -1317,4 +1332,20 @@ func notificationSetting(v string) string {
 	}
 
 	return "notifications_enabled"
+}
+
+func orString(v, def string) string {
+	if v == "" {
+		return def
+	}
+
+	return v
+}
+
+func orInt(v, def int) int {
+	if v == 0 {
+		return def
+	}
+
+	return v
 }

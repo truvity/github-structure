@@ -534,6 +534,35 @@ type (
 		// on, blocking its own maintainers' PRs. Set this to keep the
 		// pre-ruleset behavior explicit rather than accidental.
 		BypassOrgAdmins bool `yaml:"bypass_org_admins,omitempty"`
+		// MergeQueue, when present, adds the "require merge queue" rule:
+		// pull requests reach the branch only through GitHub's merge
+		// queue, which builds each entry on top of the ones ahead of it
+		// and runs the required checks on that merge group. Bypass actors
+		// still skip it, like every other rule of the ruleset.
+		MergeQueue *MergeQueue `yaml:"merge_queue,omitempty"`
+	}
+
+	// MergeQueue is the merge-queue rule's settings. An omitted field takes
+	// GitHub's own default, written out explicitly at deploy so the
+	// ruleset never shows a perpetual diff against what the API returns.
+	MergeQueue struct {
+		// MergeMethod is MERGE, SQUASH or REBASE. Default SQUASH here
+		// (GitHub's default is MERGE): the estate squash-merges.
+		MergeMethod string `yaml:"merge_method,omitempty"`
+		// GroupingStrategy is ALLGREEN or HEADGREEN. Default ALLGREEN.
+		GroupingStrategy string `yaml:"grouping_strategy,omitempty"`
+		// MaxEntriesToBuild is how many entries run checks at once. Default 5.
+		MaxEntriesToBuild int `yaml:"max_entries_to_build,omitempty"`
+		// MaxEntriesToMerge is the largest group merged together. Default 5.
+		MaxEntriesToMerge int `yaml:"max_entries_to_merge,omitempty"`
+		// MinEntriesToMerge is the smallest group merged together. Default 1.
+		MinEntriesToMerge int `yaml:"min_entries_to_merge,omitempty"`
+		// MinEntriesToMergeWaitMinutes is how long a smaller group waits
+		// for MinEntriesToMerge. Default 5.
+		MinEntriesToMergeWaitMinutes int `yaml:"min_entries_to_merge_wait_minutes,omitempty"`
+		// CheckResponseTimeoutMinutes is how long a required check may
+		// take before it counts as failed. Default 60.
+		CheckResponseTimeoutMinutes int `yaml:"check_response_timeout_minutes,omitempty"`
 	}
 
 	// TagRuleset is one tag-protection ruleset row on a repository.
@@ -1683,7 +1712,7 @@ func validateBranchRulesets(login, name string, repo *Repo) error {
 			return fmt.Errorf("org %q repo %q: branch_rulesets[%d]: name is required", login, name, i)
 		case rs.Pattern == "":
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: pattern is required", login, name, rs.Name)
-		case rs.RequiredApprovals <= 0 && len(rs.RequiredChecks) == 0:
+		case rs.RequiredApprovals <= 0 && len(rs.RequiredChecks) == 0 && rs.MergeQueue == nil:
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: required_approvals must be positive"+
 				" or required_checks non-empty — a ruleset enforcing nothing is noise", login, name, rs.Name)
 		case len(rs.BypassApps) == 0 && !rs.BypassOrgAdmins:
@@ -1694,6 +1723,10 @@ func validateBranchRulesets(login, name string, repo *Repo) error {
 		// See validateTagRulesets: spelling at load, existence at deploy.
 		if err := refuseAppIDSpellings(rs.BypassApps); err != nil {
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: %w", login, name, rs.Name, err)
+		}
+
+		if err := rs.MergeQueue.validate(); err != nil {
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: merge_queue: %w", login, name, rs.Name, err)
 		}
 	}
 
@@ -1824,6 +1857,45 @@ func (o *Org) validateRunnerGroups(login string) error {
 		if group.RestrictedToWorkflows && len(group.SelectedWorkflows) == 0 {
 			return fmt.Errorf("org %q runner group %q: restricted_to_workflows needs selected_workflows", login, name)
 		}
+	}
+
+	return nil
+}
+
+// validate checks a merge queue's settings against GitHub's accepted
+// ranges, so a bad value fails at load and not as an API error mid-deploy.
+// A nil queue is valid: the rule is simply absent.
+func (m *MergeQueue) validate() error {
+	if m == nil {
+		return nil
+	}
+
+	switch m.MergeMethod {
+	case "", "MERGE", "SQUASH", "REBASE":
+	default:
+		return fmt.Errorf("merge_method %q is not MERGE, SQUASH or REBASE", m.MergeMethod)
+	}
+
+	switch m.GroupingStrategy {
+	case "", "ALLGREEN", "HEADGREEN":
+	default:
+		return fmt.Errorf("grouping_strategy %q is not ALLGREEN or HEADGREEN", m.GroupingStrategy)
+	}
+
+	for field, v := range map[string]int{
+		"max_entries_to_build":              m.MaxEntriesToBuild,
+		"max_entries_to_merge":              m.MaxEntriesToMerge,
+		"min_entries_to_merge":              m.MinEntriesToMerge,
+		"min_entries_to_merge_wait_minutes": m.MinEntriesToMergeWaitMinutes,
+		"check_response_timeout_minutes":    m.CheckResponseTimeoutMinutes,
+	} {
+		if v < 0 {
+			return fmt.Errorf("%s %d is negative", field, v)
+		}
+	}
+
+	if m.MinEntriesToMerge > 0 && m.MaxEntriesToMerge > 0 && m.MinEntriesToMerge > m.MaxEntriesToMerge {
+		return fmt.Errorf("min_entries_to_merge %d exceeds max_entries_to_merge %d", m.MinEntriesToMerge, m.MaxEntriesToMerge)
 	}
 
 	return nil
