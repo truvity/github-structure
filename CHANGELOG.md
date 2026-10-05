@@ -6,6 +6,10 @@ taking a new one.
 
 ## Unreleased
 
+## v0.14.1 — 2026-10-05
+
+- Dependency updates.
+
 ## v0.14.0 — 2026-10-05
 
 ### Added
