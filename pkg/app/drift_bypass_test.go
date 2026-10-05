@@ -60,16 +60,16 @@ func TestCompareBypassSets(t *testing.T) {
 }
 
 // workflow-only-tags is declared by a row field; its expected bypass set
-// is the GitHub Actions integration alone, so a hand-added team or admin
-// shows up as drift.
+// is the field's App alone, so a hand-added team or admin shows up as
+// drift, and so does the App going missing.
 func TestWorkflowOnlyTagsExpectedActors(t *testing.T) {
-	want := declaredRenderedActors(registry.WorkflowOnlyTagsRulesetFor([]string{"deploy/v*"}))
-	if len(want) != 1 || want[0] != "Integration:15368" {
+	want := declaredRenderedActors(registry.WorkflowOnlyTagsRulesetFor([]string{"deploy/v*"}, 424242))
+	if len(want) != 1 || want[0] != "Integration:424242" {
 		t.Fatalf("want = %v", want)
 	}
 
 	d := compareBypassSets("repo x ruleset workflow-only-tags", "bypass actors", want,
-		[]string{"Integration:15368", "Team:7", "OrganizationAdmin:0"})
+		[]string{"Integration:424242", "Team:7", "OrganizationAdmin:0"})
 	if len(d) != 1 || d[0].Got != "extra: OrganizationAdmin:0, Team:7" {
 		t.Fatalf("drift = %+v", d)
 	}

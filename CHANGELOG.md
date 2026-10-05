@@ -6,6 +6,18 @@ taking a new one.
 
 ## Unreleased
 
+### Changed
+
+- **Breaking:** `workflow_only_tags:` changes shape. The v0.14.0 field was a bare list of patterns bypassed by the built-in GitHub Actions integration (App id 15368). **GitHub refuses that on apply**: `422 Actor GitHub Actions integration must be part of the ruleset source or owner organization`. The built-in integration is not an installation of the organization, so a `GITHUB_TOKEN` can never be a ruleset bypass, and the pinned id (`registry.GitHubActionsAppID`) is removed. The old shape is replaced, not kept beside the new one:
+
+  ```yaml
+  workflow_only_tags:
+    app: truvity-ci-automation-roster   # slug of an org-installed App
+    patterns: [deploy/pulumi/v*]
+  ```
+
+  `app` is resolved from the organization's live installations exactly like `bypass_apps` (an unknown slug stops the deploy; numeric ids are refused). The ruleset's only bypass actor is that App, so the release workflow must mint the App's installation token and tag with it; a person, a PAT or another App is refused. The loader refuses a list in the old shape (with this explanation), `app: github-actions`, a missing `app`, and everything it refused before: empty or duplicate patterns, patterns that could match a root release tag (`v*`), overlap with `tag_rulesets`, a `tag_rulesets` row named `workflow-only-tags`. The drift check expects the bypass set to be exactly that App. No row used the old shape in production: it never applied.
+
 ## v0.14.0 — 2026-10-05
 
 ### Added

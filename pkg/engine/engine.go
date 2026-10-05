@@ -546,7 +546,7 @@ func deployRepos(
 				return fmt.Errorf("repo %s tag rulesets: %w", name, err)
 			}
 
-			if err := deployWorkflowOnlyTags(c, name, orgCfg.Repos[name].WorkflowOnlyTags, provider); err != nil {
+			if err := deployWorkflowOnlyTags(c, name, live.installedApps, orgCfg.Repos[name].WorkflowOnlyTags, provider); err != nil {
 				return fmt.Errorf("repo %s workflow-only tags: %w", name, err)
 			}
 
@@ -1017,18 +1017,29 @@ func deployTagRulesets(
 
 // deployWorkflowOnlyTags declares the one `workflow-only-tags` ruleset a
 // row's workflow_only_tags stands for: creation, update and deletion of
-// the matching tags, bypassed by the built-in GitHub Actions integration
-// and nobody else. Create-only, no import, like deployTagRulesets.
+// the matching tags, bypassed by the row's App and nobody else.
+// Create-only, no import, like deployTagRulesets.
 //
-// The actor is a pinned constant, not resolved against installations:
-// the built-in integration is not an installation of the org.
+// The App is a slug resolved against the org's installations, like
+// bypass_apps, and an unknown slug fails the deploy. The built-in GitHub
+// Actions integration cannot be used: GitHub refuses it as a bypass.
 func deployWorkflowOnlyTags(
 	c *pulumi.Context,
 	repoName string,
-	patterns []string,
+	installed registry.InstalledApps,
+	wot *registry.WorkflowOnlyTags,
 	provider *github.Provider,
 ) error {
-	rs := registry.WorkflowOnlyTagsRulesetFor(patterns)
+	if wot == nil {
+		return nil
+	}
+
+	appIDs, err := installed.BypassAppIDs([]string{wot.App})
+	if err != nil {
+		return fmt.Errorf("workflow-only tags: %w", err)
+	}
+
+	rs := registry.WorkflowOnlyTagsRulesetFor(wot.Patterns, appIDs[0])
 	if rs == nil {
 		return nil
 	}
@@ -1047,7 +1058,7 @@ func deployWorkflowOnlyTags(
 		})
 	}
 
-	_, err := github.NewRepositoryRuleset(c, "ruleset-"+repoName+"-"+rs.Name, &github.RepositoryRulesetArgs{
+	_, err = github.NewRepositoryRuleset(c, "ruleset-"+repoName+"-"+rs.Name, &github.RepositoryRulesetArgs{
 		Name:        pulumi.String(rs.Name),
 		Repository:  pulumi.String(repoName),
 		Target:      pulumi.String(rs.Target),

@@ -3,20 +3,15 @@ package registry
 import (
 	"fmt"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 )
 
 const (
-	// GitHubActionsAppID is the GitHub App database id of the built-in
-	// GitHub Actions integration, the identity behind a workflow's
-	// GITHUB_TOKEN. Read from `GET /apps/github-actions` (slug
-	// `github-actions`) on 2026-10-05; it is GitHub's own constant, the
-	// same on every organization.
-	//
-	// It is pinned here instead of resolved because the usual route
-	// cannot reach it: bypass_apps resolves slugs from the org's
-	// installations (`GET /orgs/{org}/installations`), and the built-in
-	// integration is not an installation of any organization.
-	GitHubActionsAppID = 15368
+	// githubActionsSlug is the slug of the built-in GitHub Actions
+	// integration, the identity behind a workflow's GITHUB_TOKEN. It is
+	// refused as a workflow_only_tags app, see validateWorkflowOnlyTags.
+	githubActionsSlug = "github-actions"
 
 	// WorkflowOnlyTagsRuleset is the display name of the one ruleset a
 	// repository's `workflow_only_tags` renders. Fixed, so the engine
@@ -28,10 +23,51 @@ const (
 
 	// rootReleaseTags is the shape of a root release tag (v1.2.3). A
 	// workflow-only pattern that can match any such name is refused:
-	// the ruleset's only bypass is a workflow, so catching root tags
-	// would take the manual signed-tag path away.
+	// the ruleset's only bypass is a workflow's App, so catching root
+	// tags would take the manual signed-tag path away.
 	rootReleaseTags = "v*"
 )
+
+// WorkflowOnlyTags is a row's `workflow_only_tags:` value: tag name
+// patterns that only one named App may write, and that App's slug.
+//
+//	workflow_only_tags:
+//	  app: truvity-ci-automation-roster
+//	  patterns: [deploy/pulumi/v*]
+type WorkflowOnlyTags struct {
+	// App is the slug of the one App that may create, update and delete
+	// the tags, resolved from the organization's installations exactly
+	// like bypass_apps. The repository's release workflow mints that
+	// App's installation token and writes the tags with it.
+	App string `yaml:"app"`
+	// Patterns are tag names relative to refs/tags/.
+	Patterns []string `yaml:"patterns"`
+}
+
+// UnmarshalYAML refuses the v0.14.0 spelling (a bare list of patterns)
+// with the reason it is gone, instead of yaml's "cannot unmarshal !!seq
+// into WorkflowOnlyTags".
+func (w *WorkflowOnlyTags) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.SequenceNode {
+		return fmt.Errorf("workflow_only_tags is no longer a list of patterns (the v0.14.0 shape):" +
+			" it bypassed the built-in GitHub Actions integration, which GitHub refuses on apply" +
+			" (422 \"Actor GitHub Actions integration must be part of the ruleset source or owner organization\")." +
+			" Write `workflow_only_tags: {app: <slug of an org-installed App>, patterns: [...]}`" +
+			" and have the release workflow tag with that App's installation token")
+	}
+
+	type plain WorkflowOnlyTags
+
+	var p plain
+
+	if err := n.Decode(&p); err != nil {
+		return err
+	}
+
+	*w = WorkflowOnlyTags(p)
+
+	return nil
+}
 
 // RenderedRuleset is the declarative shape of a ruleset the engine
 // renders and the drift check compares: everything a reader needs to see
@@ -56,12 +92,14 @@ type RenderedActor struct {
 // WorkflowOnlyTagsRulesetFor renders a repository's workflow_only_tags
 // patterns as the single ruleset they stand for, or nil when there are
 // none. Patterns are relative tag names and gain the refs/tags/ prefix.
+// appID is the database id the row's App slug resolved to
+// (InstalledApps.BypassAppIDs).
 //
-// The only bypass actor is the GitHub Actions integration. No team and
-// no OrganizationAdmin: the point is that a tag matching these patterns
-// can come from the repository's own release workflow (GITHUB_TOKEN)
-// and from nothing else, an App token or a PAT included.
-func WorkflowOnlyTagsRulesetFor(patterns []string) *RenderedRuleset {
+// The only bypass actor is that App. No team and no OrganizationAdmin:
+// the point is that a tag matching these patterns can come from the
+// repository's release workflow (holding the App's installation token)
+// and from nothing else, a person's or another App's credential included.
+func WorkflowOnlyTagsRulesetFor(patterns []string, appID int) *RenderedRuleset {
 	if len(patterns) == 0 {
 		return nil
 	}
@@ -79,7 +117,7 @@ func WorkflowOnlyTagsRulesetFor(patterns []string) *RenderedRuleset {
 		Exclude:     []string{},
 		Rules:       []string{"creation", "update", "deletion"},
 		BypassActors: []RenderedActor{{
-			ActorID:    GitHubActionsAppID,
+			ActorID:    appID,
 			ActorType:  "Integration",
 			BypassMode: "always",
 		}},
@@ -90,11 +128,17 @@ func WorkflowOnlyTagsRulesetFor(patterns []string) *RenderedRuleset {
 // rules that keep the ruleset from bricking a release path.
 //
 // This ruleset is exempt from the at-least-one-bypass-team rule that
-// every tag_rulesets row answers to, BECAUSE its bypass is the workflow:
-// the rule exists so a ruleset is never one nobody can bypass, and the
-// repository's release workflow can always bypass this one. A team here
-// would also be a hole, since the field's purpose is that a human or an
-// App credential cannot write these tags.
+// every tag_rulesets row answers to, BECAUSE its bypass is the release
+// workflow's App: the rule exists so a ruleset is never one nobody can
+// bypass, and the release workflow can always bypass this one. A team
+// here would also be a hole, since the field's purpose is that a human
+// cannot write these tags.
+//
+// The built-in GitHub Actions integration is refused as the app. GitHub
+// answers a ruleset naming it with 422 "Actor GitHub Actions integration
+// must be part of the ruleset source or owner organization" (found on
+// apply, 2026-10-05): it is not an installation of the organization, so
+// a GITHUB_TOKEN can never be a ruleset bypass.
 func validateWorkflowOnlyTags(login, name string, repo *Repo) error {
 	if repo.WorkflowOnlyTags == nil {
 		return nil
@@ -102,13 +146,28 @@ func validateWorkflowOnlyTags(login, name string, repo *Repo) error {
 
 	where := fmt.Sprintf("org %q repo %q: workflow_only_tags", login, name)
 
-	if len(repo.WorkflowOnlyTags) == 0 {
-		return fmt.Errorf("%s: empty list — omit the field to declare none", where)
+	switch app := repo.WorkflowOnlyTags.App; {
+	case strings.TrimSpace(app) == "":
+		return fmt.Errorf("%s: app is required — the slug of the org-installed App whose installation"+
+			" token the release workflow tags with", where)
+	case app == githubActionsSlug:
+		return fmt.Errorf("%s: app %q is refused: GitHub rejects the built-in GitHub Actions integration"+
+			" as a ruleset bypass (422 \"Actor GitHub Actions integration must be part of the ruleset"+
+			" source or owner organization\"), so a GITHUB_TOKEN can never be reserved this way."+
+			" Name an App installed on the organization and tag with its installation token", where, app)
 	}
 
-	seen := make(map[string]bool, len(repo.WorkflowOnlyTags))
+	if err := refuseAppIDSpelling(repo.WorkflowOnlyTags.App); err != nil {
+		return fmt.Errorf("%s: %w", where, err)
+	}
 
-	for _, p := range repo.WorkflowOnlyTags {
+	if len(repo.WorkflowOnlyTags.Patterns) == 0 {
+		return fmt.Errorf("%s: patterns is empty — omit the field to declare none", where)
+	}
+
+	seen := make(map[string]bool, len(repo.WorkflowOnlyTags.Patterns))
+
+	for _, p := range repo.WorkflowOnlyTags.Patterns {
 		if err := checkWorkflowOnlyPattern(p); err != nil {
 			return fmt.Errorf("%s: %q: %w", where, p, err)
 		}
@@ -138,7 +197,7 @@ func validateWorkflowOnlyTags(login, name string, repo *Repo) error {
 
 		other := strings.TrimPrefix(rs.Pattern, tagRefPrefix)
 
-		for _, p := range repo.WorkflowOnlyTags {
+		for _, p := range repo.WorkflowOnlyTags.Patterns {
 			if globsIntersect(p, other) {
 				return fmt.Errorf("%s: %q overlaps tag ruleset %q (%s): two rulesets would govern the same tags,"+
 					" and the one with a team bypass would defeat this one's purpose",
