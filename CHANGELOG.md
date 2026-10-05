@@ -6,6 +6,10 @@ taking a new one.
 
 ## Unreleased
 
+### Added
+
+- Repository rows take an optional `workflow_only_tags:` list of relative tag patterns (`deploy/pulumi/v*`). It renders one tag ruleset, `workflow-only-tags` (creation, update, deletion), whose only bypass actor is the built-in GitHub Actions integration (pinned App id 15368), so only the repository's own release workflow can write those tags. **The workflow must create them with `GITHUB_TOKEN`**: an App token or a personal access token is refused. The ruleset is exempt from the bypass-team requirement (its bypass is the workflow). The loader refuses empty lists, duplicates, patterns that could match a root release tag (`v*`, `*`), overlap with the repository's `tag_rulesets`, and a `tag_rulesets` row named `workflow-only-tags`. The engine declares the ruleset and the drift check expects its bypass set to be exactly the integration. Unset behaves exactly as before.
+
 ## v0.13.1 — 2026-10-05
 
 - Dependency updates.

@@ -1,0 +1,11 @@
+{
+  "name": "workflow-only-tags",
+  "target": "tag",
+  "enforcement": "active",
+  "include": ["refs/tags/deploy/pulumi/v*", "refs/tags/sdk/v*"],
+  "exclude": [],
+  "rules": ["creation", "update", "deletion"],
+  "bypass_actors": [
+    {"actor_id": 15368, "actor_type": "Integration", "bypass_mode": "always"}
+  ]
+}
