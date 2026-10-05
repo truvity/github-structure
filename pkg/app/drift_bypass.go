@@ -174,9 +174,17 @@ func checkRulesetActors(
 	}
 
 	// workflow-only-tags is declared by the field, not by a row: its
-	// expected actor set is the pinned GitHub Actions integration.
-	if rs := registry.WorkflowOnlyTagsRulesetFor(repo.WorkflowOnlyTags); rs != nil {
-		wantActors[rs.Name] = declaredRenderedActors(rs)
+	// expected actor set is the field's App alone. Resolved like a
+	// bypass_apps name, and refused the same way when it does not.
+	if wot := repo.WorkflowOnlyTags; wot != nil {
+		appIDs, err := installed.BypassAppIDs([]string{wot.App})
+		if err != nil {
+			return nil, fmt.Errorf("repo %s workflow-only tags: %w", name, err)
+		}
+
+		if rs := registry.WorkflowOnlyTagsRulesetFor(wot.Patterns, appIDs[0]); rs != nil {
+			wantActors[rs.Name] = declaredRenderedActors(rs)
+		}
 	}
 
 	branch := repo.BranchRulesets

@@ -6,6 +6,6 @@
   "exclude": [],
   "rules": ["creation", "update", "deletion"],
   "bypass_actors": [
-    {"actor_id": 15368, "actor_type": "Integration", "bypass_mode": "always"}
+    {"actor_id": 424242, "actor_type": "Integration", "bypass_mode": "always"}
   ]
 }

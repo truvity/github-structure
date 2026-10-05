@@ -77,8 +77,9 @@ orgs:
           - <name>                # …the org's named ruleset of that name
           - {name: …, pattern: refs/tags/…, bypass_teams: […],
              bypass_apps: […]}     # …or a one-off body. App SLUGS, live
-        workflow_only_tags:       # tags only the repo's own release
-          - deploy/pulumi/v*      # workflow may write (see below)
+        workflow_only_tags:       # tags only the release workflow's App
+          app: <app slug>         # may write (see below)
+          patterns: [deploy/pulumi/v*]
         branch_rulesets: [...]
     runner_groups: {…}
 ```
@@ -189,32 +190,39 @@ orgs:
           - {name: project-tags, pattern: "refs/tags/*/v*", bypass_teams: [role-release]}
 ```
 
-**Workflow-only tags** are a row's `workflow_only_tags:` — relative tag
-names (`deploy/pulumi/v*`, rendered as `refs/tags/deploy/pulumi/v*`) that
-only the repository's own release workflow may create, update or delete.
-It renders ONE tag ruleset named `workflow-only-tags` (creation, update
-and deletion, active) whose only bypass actor is the built-in GitHub
-Actions integration (`Integration`, App id 15368, `bypass_mode: always`).
-No team, no organization admin.
+**Workflow-only tags** are a row's `workflow_only_tags:` — an `app` slug
+and relative tag `patterns` (`deploy/pulumi/v*`, rendered as
+`refs/tags/deploy/pulumi/v*`) that only that App may create, update or
+delete. It renders ONE tag ruleset named `workflow-only-tags` (creation,
+update and deletion, active) whose only bypass actor is the App
+(`Integration`, `bypass_mode: always`). No team, no organization admin.
 
 ```yaml
       service:
         preset: public
-        workflow_only_tags: [deploy/pulumi/v*, sdk/v*]
+        workflow_only_tags:
+          app: truvity-ci-automation-roster
+          patterns: [deploy/pulumi/v*, sdk/v*]
 ```
 
-- **The workflow must tag with `GITHUB_TOKEN`.** That token is the
-  integration's identity. A token minted for another App, or a personal
-  access token, is refused by this ruleset — by design.
-- The id is a pinned constant (`registry.GitHubActionsAppID`), not a
-  `bypass_apps` slug: that field resolves against the org's
-  installations, and the built-in integration is not one. Numeric ids
-  stay refused in `bypass_apps`.
+- **The release workflow must tag with that App's installation token**,
+  minted in the job (for example by an OIDC token exchange), not with
+  `GITHUB_TOKEN`. A person, a personal access token or any other App is
+  refused by this ruleset — by design.
+- `app` is a slug resolved from the org's installations exactly like
+  `bypass_apps` (an unknown slug stops the deploy; numeric ids are
+  refused).
+- **The built-in GitHub Actions integration cannot be the App.** GitHub
+  answers `422 Actor GitHub Actions integration must be part of the
+  ruleset source or owner organization`: it is not an installation of the
+  organization, so tags created with `GITHUB_TOKEN` can never be reserved
+  with a ruleset. The v0.14.0 list shape that pinned it (App id 15368)
+  is replaced; the loader refuses it and `app: github-actions`.
 - The ruleset is exempt from the at-least-one-bypass-team rule that
   `tag_rulesets` rows answer to. That rule exists so a ruleset is never
   one nobody can bypass; the release workflow can always bypass this
   one, and a team here would be a hole in the very thing it is for.
-- Refused at load: an empty list; duplicates; a pattern that could match
+- Refused at load: a missing `app`, `app: github-actions`, the old list shape, empty `patterns`; duplicates; a pattern that could match
   a root release tag (`v*`, `*`, `**`, `v1.*`, …), so a manual signed
   `v1.2.3` tag stays possible; a pattern that overlaps the include
   pattern of any of the repository's `tag_rulesets` (root `v*` rulesets
@@ -222,7 +230,7 @@ No team, no organization admin.
   `workflow-only-tags`; any of it on an archived repository. Patterns
   take literal text, `?`, `*` (not across `/`) and `**`.
 - The drift check expects the ruleset to exist and its bypass set to be
-  exactly the integration.
+  exactly the App.
 
 **Waivers by reason** are the org's `checks_waived:` — a map from the
 reason to the repositories it covers. It is the same fact as the row's

@@ -423,15 +423,17 @@ type (
 		// contract, not of its settings tier.
 		TagRulesets []*TagRuleset `yaml:"tag_rulesets,omitempty"`
 		// WorkflowOnlyTags are tag name patterns relative to refs/tags/
-		// (`deploy/pulumi/v*`) that only the repository's own release
-		// workflow may create, update or delete: the built-in GitHub
-		// Actions integration acting with GITHUB_TOKEN. Renders ONE tag
-		// ruleset named `workflow-only-tags` whose only bypass actor is
-		// that integration. A token from an App or a PAT is refused by
-		// it. Exempt from the bypass-team requirement of tag_rulesets;
-		// see validateWorkflowOnlyTags. Patterns that could match a root
-		// release tag (v*) are refused.
-		WorkflowOnlyTags []string `yaml:"workflow_only_tags,omitempty"`
+		// (`deploy/pulumi/v*`) that only the repository's release
+		// workflow may create, update or delete, and the slug of the
+		// org-installed App whose installation token that workflow tags
+		// with: `{app: <slug>, patterns: [...]}`. Renders ONE tag ruleset
+		// named `workflow-only-tags` whose only bypass actor is that App,
+		// resolved from the org's installations like bypass_apps. The
+		// built-in GitHub Actions integration cannot be the actor (GitHub
+		// refuses it with a 422). Exempt from the bypass-team requirement
+		// of tag_rulesets; see validateWorkflowOnlyTags. Patterns that
+		// could match a root release tag (v*) are refused.
+		WorkflowOnlyTags *WorkflowOnlyTags `yaml:"workflow_only_tags,omitempty"`
 		// BranchRulesets are repository rulesets targeting branches —
 		// today expressing exactly one shape: a pull-request approval
 		// requirement that named GitHub Apps may bypass. This exists
@@ -1493,7 +1495,7 @@ func (c *Config) validateRepos(login string, org *Org) error {
 					" repository is read-only and takes no tag pushes to restrict. Delete them, or unarchive", login, name)
 			}
 
-			if len(repo.WorkflowOnlyTags) > 0 {
+			if repo.WorkflowOnlyTags != nil {
 				return fmt.Errorf("org %q repo %q: archived, so workflow_only_tags do nothing — an archived"+
 					" repository is read-only and runs no release workflow. Delete them, or unarchive", login, name)
 			}

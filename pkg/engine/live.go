@@ -210,6 +210,10 @@ func (s *liveState) readInstalledApps(ctx context.Context, client *app.Client, o
 // App at all.
 func namesBypassApps(orgCfg *registry.Org) bool {
 	for _, repo := range orgCfg.Repos {
+		if repo.WorkflowOnlyTags != nil {
+			return true
+		}
+
 		for _, rs := range repo.TagRulesets {
 			if len(rs.BypassApps) > 0 {
 				return true
