@@ -6,6 +6,10 @@ taking a new one.
 
 ## Unreleased
 
+### Added
+
+- **`engine.LoadCredentials`: read an org's engine App credentials from the place its registry row names.** An `openbao` credential is one pushed KV secret (`engine.KV`, opened by the estate's `CredentialSources.OpenKV`), an `ssm_prefix` credential is three mirrored parameters (`CredentialSources.ReadParameter`). Exactly the registry's one source is used and a missing or half-written secret stops the run, naming the org, the place and the property. `engine.CredentialsFromKV` is the pure mapping. Moved out of an estate's deploy glue; the estate supplies only how to reach each store and the three property names.
+
 ## v0.14.1 — 2026-10-05
 
 - Dependency updates.
