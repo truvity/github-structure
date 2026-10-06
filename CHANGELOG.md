@@ -4,7 +4,7 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
-## Unreleased
+## v0.15.0 — 2026-10-06
 
 ### Added
 
