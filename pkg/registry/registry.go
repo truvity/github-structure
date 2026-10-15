@@ -253,6 +253,12 @@ type (
 		// "who owns Dependabot alerts". See
 		// docs/operations/github-security-configurations.md.
 		SecurityConfigurations map[string]*SecurityConfiguration `yaml:"security_configurations,omitempty"`
+		// DefaultSecurityConfiguration names the configuration (a key of
+		// SecurityConfigurations) every non-archived repository is
+		// attached to unless its row says otherwise. Empty: no default.
+		// Read by the attachment reconciler (pkg/seccfg), never by the
+		// Pulumi engine.
+		DefaultSecurityConfiguration string `yaml:"default_security_configuration,omitempty"`
 	}
 
 	// SecurityConfiguration is one org-level code security configuration,
@@ -406,6 +412,12 @@ type (
 		// exactly as before the field existed; otherwise an absolute
 		// https URL.
 		Homepage string `yaml:"homepage,omitempty"`
+		// SecurityConfiguration names the code security configuration
+		// (a key of the org's security_configurations) this repository
+		// is attached to, overriding the org default. Empty: the default,
+		// or unmanaged when there is none. Not an engine input: the
+		// attachment is reconciled over REST by pkg/seccfg.
+		SecurityConfiguration string `yaml:"security_configuration,omitempty"`
 		// Teams are grants ADDED to this repo's access bundles, or upgrades
 		// of one. Removal is expressed by not listing the bundle, which is
 		// the whole point of splitting access from presets: it used to be
@@ -1410,6 +1422,10 @@ func validateHomepage(v string) error {
 }
 
 func (c *Config) validateRepos(login string, org *Org) error {
+	if err := validateSecurityConfigurationName(org, org.DefaultSecurityConfiguration); err != nil {
+		return fmt.Errorf("org %q default_security_configuration: %w", login, err)
+	}
+
 	for _, name := range org.SortedRepos() {
 		repo := org.Repos[name]
 
@@ -1431,6 +1447,10 @@ func (c *Config) validateRepos(login string, org *Org) error {
 
 		if err := validateHomepage(repo.Homepage); err != nil {
 			return fmt.Errorf("org %q repo %q: %w", login, name, err)
+		}
+
+		if err := validateSecurityConfigurationName(org, repo.SecurityConfiguration); err != nil {
+			return fmt.Errorf("org %q repo %q security_configuration: %w", login, name, err)
 		}
 
 		if repo.Review != "" && !validReview[repo.Review] {

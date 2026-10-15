@@ -14,6 +14,7 @@ what nobody declared.
 | `pkg/registry` | The registry schema: settings **profiles**, per-repo **overrides with reasons**, **waivers with exit conditions**; strict loading (unknown keys are errors) and validation |
 | `pkg/engine` | The Pulumi engine: org settings, owners, teams, repos, protection, rulesets, Actions permissions — import-first adoption of what already exists |
 | `pkg/preflight` | The guards that run BEFORE the engine: refuse replaces of irreplaceable resources, catch waivers that outlived their cause, refuse plans that empty teams |
+| `pkg/seccfg` | The code security configuration **attachment reconciler** (`Plan` / `Apply`) and the `github-structure security-configurations` command. REST, not Pulumi; it attaches and never detaches |
 | `pkg/app` | The GitHub App side: App JWT, the REST client, drift checks (variables, owners, repo settings, bypass surfaces), and resolving a ruleset's bypass App slugs against the org's live installations. It authenticates AS an App; it never creates, inventories or audits one |
 
 Extracted from a production estate that manages two organizations with
@@ -119,6 +120,63 @@ library.
 - [docs/adoption.md](docs/adoption.md) — adopting an existing organization
   (import-first), creating the engine's App with one click, day-1 order
 - [docs/registry.md](docs/registry.md) — the registry file, field by field
+
+## Code security configuration attachments
+
+Which org-level code security configuration each repository is attached
+to is declared in the registry and reconciled over REST, **not** by the
+Pulumi engine:
+
+```yaml
+orgs:
+  example-org:
+    security_configurations:            # inventory of what exists
+      Baseline: {enforcement: enforced, dependabot_alerts: enabled, ...}
+    default_security_configuration: Baseline   # optional org default
+    repos:
+      example-repo:
+        preset: private
+        security_configuration: Baseline       # optional per-row value
+```
+
+**Why not a Pulumi resource.** pulumi-github has no resource for code
+security configurations or their attachments, so there is nothing to
+declare. And under an *enforced* configuration GitHub refuses per-repository
+writes to the settings it covers (HTTP 422, "An enforced security
+configuration prevented modifying ..."), deletes included: a per-repository
+resource for such a setting can be created but never deleted, and one stuck
+pending-delete wedges the whole stack. A resource whose value a policy
+outside the stack dictates should not be declared inside it.
+
+**How it works.** `seccfg.Plan(ctx, client, org, desired)` resolves
+configuration and repository names to ids, reads each desired repository's
+current attachment and returns a `ChangeSet` (`attach <repo>: <current> ->
+<desired>`). `seccfg.Apply` makes one `attach` call per target
+configuration. Rules:
+
+- It **never detaches.** A repository absent from the desired set is
+  reported as *unmanaged* and left alone, as is one whose row and org
+  default are both empty. Archived repositories take only an explicit value.
+- An unknown configuration or repository (or an archived target) is a plan
+  error naming every offender, before any write.
+- GitHub accepts an attach asynchronously (HTTP 202); re-run `plan` to see
+  it settle.
+
+**Running it from an estate pipeline.** Run `plan` on every change and
+`apply` after the Pulumi deploy, with a token that may administer the
+organization's code security configurations (a personal token with
+organization administration, or an App installation token; `GH_TOKEN` or
+`GITHUB_TOKEN`):
+
+```sh
+github-structure security-configurations plan  --org example-org --registry cfg/github.yaml
+github-structure security-configurations apply --org example-org --registry cfg/github.yaml --confirm
+```
+
+`--desired <file>` takes a standalone `repos: {<repo>: <configuration>}`
+file instead of a registry. `plan` is read-only and exits non-zero only on
+errors; `apply` refuses without `--confirm`. The library functions are the
+same ones, for a pipeline that already holds an App client.
 
 ## The rule that makes this repository public
 
