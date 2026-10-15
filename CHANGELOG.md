@@ -4,6 +4,13 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.16.0 — 2026-10-15
+
+### Added
+
+- **Code security configuration attachments, reconciled over REST.** Repository rows take an optional `security_configuration:` and an org takes an optional `default_security_configuration:`, each naming a key of the org's `security_configurations:` inventory (the loader refuses a name the inventory lacks). Neither is read by the Pulumi engine: the provider has no resource for them, and an enforced configuration refuses per-repository writes, so a Pulumi resource could be created but never deleted. New package `pkg/seccfg` provides `Plan(ctx, client, org, desired)` and `Apply(ctx, client, plan)` (the plan type is `ChangeSet`): names are resolved to ids, current attachments compared, and `Apply` makes one `attach` call per target configuration. It **never detaches**; repositories not in the desired set are reported as unmanaged, and an unknown configuration or repository is a plan error before any write. `Org.SecurityConfigurationAssignments()` turns a registry org into the desired map (archived repositories take only an explicit value).
+- **`github-structure security-configurations plan|apply`** (`cmd/github-structure`), reading `--registry <github.yaml>` or `--desired <file>`, token from `GH_TOKEN`/`GITHUB_TOKEN`. `plan` is read-only; `apply` refuses without `--confirm`. No adoption step: unset behaves exactly as before.
+
 ## v0.15.0 — 2026-10-06
 
 ### Added

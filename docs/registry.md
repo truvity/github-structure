@@ -66,6 +66,12 @@ orgs:
         description: …            # optional; written to GitHub
         homepage: https://…       # optional; absolute https URL, written
                                   # to GitHub. Unset = empty, as before
+        security_configuration: <name>  # optional; a key of the org's
+                                  # security_configurations. Not an engine
+                                  # input: reconciled by `github-structure
+                                  # security-configurations` (see README).
+                                  # The org's
+                                  # default_security_configuration fills it
         archived: true            # read-only rows: repo + nothing else
         checks_waived: >-         # free text, MUST carry its exit
           New repo, no CI yet. Exit: delete when ci.yaml reports
