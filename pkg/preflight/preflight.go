@@ -69,7 +69,7 @@ var replaceOps = map[string]bool{
 // deleteGuarded lists resource types whose plain DELETE is dangerous
 // enough to stop a run, separately from replacement.
 //
-// Branch protection only. Its delete is the archival wedge: an archived
+// Branch protection and repository rulesets. A protection delete is the archival wedge: an archived
 // row stops declaring protection, Pulumi orders deletes AFTER updates, so
 // the repository archives first and the delete then answers
 // "Repository is archived". The run fails half-applied and every
@@ -89,8 +89,16 @@ var replaceOps = map[string]bool{
 // nobody manages, which is the opposite of a safe default for a security
 // control. So the delete stays real, and this guard makes it impossible
 // to run one by accident.
+//
+// A repository ruleset is the same trap: archiving a repository drops its
+// rulesets from the plan, the delete is ordered after the archive and
+// answers 403 against the archived repository, and the stack wedges the
+// same way (12 `<repo>-pr-approval` rulesets planned a delete on one
+// archival day).
 var deleteGuarded = map[string]string{
 	protectionType: "deleting branch protection 403s once the repo is archived and wedges the stack; " +
+		"if this is an archival, remove it from state first (docs/operations/github-repo-archival.md)",
+	rulesetType: "deleting a repository ruleset 403s once the repo is archived and wedges the stack; " +
 		"if this is an archival, remove it from state first (docs/operations/github-repo-archival.md)",
 }
 

@@ -21,6 +21,8 @@ const (
 	repoType = "github:index/repository:Repository"
 	// protectionType is the provider token for a branch protection rule.
 	protectionType = "github:index/branchProtection:BranchProtection"
+	// rulesetType is the provider token for a repository ruleset.
+	rulesetType = "github:index/repositoryRuleset:RepositoryRuleset"
 )
 
 // declaredImportID returns the import ID the engine declares for a

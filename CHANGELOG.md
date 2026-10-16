@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Fixed
+
+- **The preflight refuses planned repository ruleset deletes, like branch protection.** Archiving a repository plans a delete of its `ruleset-<repo>-<name>` rulesets; against the archived repository it answers 403 and wedges the stack. The message points at the same remedy: drop the entries from state first.
+
 ## v0.16.0 — 2026-10-15
 
 ### Added
