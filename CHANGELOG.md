@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Security
+
+- **`golang.org/x/net` v0.60.0 and Go toolchain 1.27.2.** Clears the `govulncheck` findings GO-2026-6617, -6612, -6611, -6610 and -6603 in `x/net`, and the standard-library findings fixed in Go 1.27.2.
+
 ## v0.16.1 — 2026-10-16
 
 ### Fixed
