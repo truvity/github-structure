@@ -118,6 +118,27 @@ func TestCollectReplacesCatchesBranchProtection(t *testing.T) {
 	assert.Contains(t, got[0].reason, "unprotected")
 }
 
+// A repository ruleset delete is the archival wedge, same as branch
+// protection: the delete 403s once the repository is archived.
+func TestCollectReplacesCatchesRulesetDelete(t *testing.T) {
+	const typ = "github:index/repositoryRuleset:RepositoryRuleset"
+	const urn = "urn:pulumi:example::example-github::" + typ + "::ruleset-alpha-pr-approval"
+
+	got := drain(t, preEvent(urn, typ, "delete"))
+
+	require.Len(t, got, 1)
+	assert.Equal(t, urn, got[0].urn)
+	assert.Contains(t, got[0].reason, "archived")
+}
+
+// An update or create of a ruleset is routine and must not be refused.
+func TestCollectReplacesIgnoresRulesetUpdate(t *testing.T) {
+	const typ = "github:index/repositoryRuleset:RepositoryRuleset"
+	const urn = "urn:pulumi:example::example-github::" + typ + "::ruleset-alpha-pr-approval"
+
+	assert.Empty(t, drain(t, preEvent(urn, typ, "update"), preEvent(urn, typ, "create")))
+}
+
 // Events without a ResourcePreEvent (summaries, diagnostics, stdout) make up
 // most of the stream and must not panic the collector.
 func TestCollectReplacesSkipsNonResourceEvents(t *testing.T) {
