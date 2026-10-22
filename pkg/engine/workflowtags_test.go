@@ -9,6 +9,8 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/truvity/github-structure/pkg/registry"
 )
 
 type captureMocks struct {
@@ -30,8 +32,8 @@ func (m *captureMocks) Call(a pulumi.MockCallArgs) (resource.PropertyMap, error)
 }
 
 // The plan for workflow_only_tags: one tag ruleset named
-// workflow-only-tags, with the GitHub Actions integration as its only
-// bypass actor.
+// workflow-only-tags, with the row's App (resolved from installations) as
+// its only bypass actor.
 func TestDeployWorkflowOnlyTagsPlan(t *testing.T) {
 	mocks := &captureMocks{seen: map[string]resource.PropertyMap{}}
 
@@ -41,7 +43,8 @@ func TestDeployWorkflowOnlyTagsPlan(t *testing.T) {
 			return err
 		}
 
-		return deployWorkflowOnlyTags(ctx, "widget", []string{"deploy/pulumi/v*"}, provider)
+		return deployWorkflowOnlyTags(ctx, "widget", registry.InstalledApps{"release-app": 424242},
+			&registry.WorkflowOnlyTags{App: "release-app", Patterns: []string{"deploy/pulumi/v*"}}, provider)
 	}, pulumi.WithMocks("proj", "stack", mocks))
 	require.NoError(t, err)
 
@@ -65,7 +68,7 @@ func TestDeployWorkflowOnlyTagsPlan(t *testing.T) {
 	require.Len(t, actors, 1)
 
 	a := actors[0].ObjectValue()
-	assert.EqualValues(t, 15368, a["actorId"].NumberValue())
+	assert.EqualValues(t, 424242, a["actorId"].NumberValue())
 	assert.Equal(t, "Integration", a["actorType"].StringValue())
 	assert.Equal(t, "always", a["bypassMode"].StringValue())
 }
@@ -74,8 +77,27 @@ func TestDeployWorkflowOnlyTagsDeclaresNothingWhenUnset(t *testing.T) {
 	mocks := &captureMocks{seen: map[string]resource.PropertyMap{}}
 
 	err := pulumi.RunErr(func(ctx *pulumi.Context) error {
-		return deployWorkflowOnlyTags(ctx, "widget", nil, nil)
+		return deployWorkflowOnlyTags(ctx, "widget", nil, nil, nil)
 	}, pulumi.WithMocks("proj", "stack", mocks))
 	require.NoError(t, err)
 	assert.Empty(t, mocks.seen)
+}
+
+// An App slug that is not installed on the org stops the deploy: a ruleset
+// whose bypass was silently dropped would lock the release workflow out.
+func TestDeployWorkflowOnlyTagsRefusesUninstalledApp(t *testing.T) {
+	mocks := &captureMocks{seen: map[string]resource.PropertyMap{}}
+
+	err := pulumi.RunErr(func(ctx *pulumi.Context) error {
+		provider, err := github.NewProvider(ctx, "gh", &github.ProviderArgs{})
+		if err != nil {
+			return err
+		}
+
+		return deployWorkflowOnlyTags(ctx, "widget", registry.InstalledApps{},
+			&registry.WorkflowOnlyTags{App: "release-app", Patterns: []string{"deploy/v*"}}, provider)
+	}, pulumi.WithMocks("proj", "stack", mocks))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not installed")
+	assert.NotContains(t, mocks.seen, "ruleset-widget-workflow-only-tags")
 }

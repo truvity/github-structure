@@ -21,12 +21,16 @@ func withWOT(t *testing.T, extra string) (*registry.Config, error) {
 }
 
 func wotList(items ...string) string {
+	return wotApp("release-app", items...)
+}
+
+func wotApp(app string, items ...string) string {
 	var b strings.Builder
 
-	b.WriteString("        preset: public\n        workflow_only_tags:\n")
+	b.WriteString("        preset: public\n        workflow_only_tags:\n          app: " + app + "\n          patterns:\n")
 
 	for _, i := range items {
-		b.WriteString("          - " + i + "\n")
+		b.WriteString("            - " + i + "\n")
 	}
 
 	return b.String()
@@ -37,7 +41,8 @@ func TestWorkflowOnlyTagsLoads(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := cfg.Orgs["acme"].Repos["widget"]
-	assert.Equal(t, []string{"deploy/pulumi/v*", "sdk/v*"}, repo.WorkflowOnlyTags)
+	assert.Equal(t, "release-app", repo.WorkflowOnlyTags.App)
+	assert.Equal(t, []string{"deploy/pulumi/v*", "sdk/v*"}, repo.WorkflowOnlyTags.Patterns)
 }
 
 // The release-tags shape (a team bypass on root v* tags) sits beside the
@@ -72,7 +77,11 @@ func TestWorkflowOnlyTagsRefusals(t *testing.T) {
 		"**":                  {wotList(`"**"`), "could match a root release tag"},
 		"v1.*":                {wotList(`"v1.*"`), "could match a root release tag"},
 		"?1.0.0":              {wotList(`"?1.0.0"`), "could match a root release tag"},
-		"empty list":          {"        preset: public\n        workflow_only_tags: []\n", "empty list"},
+		"empty patterns":      {"        preset: public\n        workflow_only_tags: {app: release-app, patterns: []}\n", "patterns is empty"},
+		"no app":              {"        preset: public\n        workflow_only_tags: {patterns: [\"deploy/v*\"]}\n", "app is required"},
+		"github-actions":      {wotApp("github-actions", `"deploy/v*"`), "422"},
+		"app id":              {wotApp(`"15368"`, `"deploy/v*"`), "database id"},
+		"v0.14.0 list shape":  {"        preset: public\n        workflow_only_tags: [\"deploy/v*\"]\n", "no longer a list"},
 		"empty pattern":       {wotList(`""`), "empty pattern"},
 		"duplicate":           {wotList(`"deploy/v*"`, `"deploy/v*"`), "listed twice"},
 		"full ref":            {wotList(`"refs/tags/deploy/v*"`), "relative to refs/tags/"},
@@ -108,20 +117,13 @@ func TestWorkflowOnlyTagsNeedsNoBypassTeam(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// GitHubActionsAppID is GitHub's own constant, read from
-// `GET /apps/github-actions` (slug github-actions) on 2026-10-05. A
-// change here must be a change at GitHub, so pin the value.
-func TestGitHubActionsAppIDIsPinned(t *testing.T) {
-	assert.Equal(t, 15368, registry.GitHubActionsAppID)
-}
-
 func TestWorkflowOnlyTagsNone(t *testing.T) {
-	assert.Nil(t, registry.WorkflowOnlyTagsRulesetFor(nil))
+	assert.Nil(t, registry.WorkflowOnlyTagsRulesetFor(nil, 7))
 }
 
 func TestWorkflowOnlyTagsRenderGolden(t *testing.T) {
 	got, err := json.MarshalIndent(
-		registry.WorkflowOnlyTagsRulesetFor([]string{"deploy/pulumi/v*", "sdk/v*"}), "", "  ")
+		registry.WorkflowOnlyTagsRulesetFor([]string{"deploy/pulumi/v*", "sdk/v*"}, 424242), "", "  ")
 	require.NoError(t, err)
 
 	want, err := os.ReadFile("testdata/workflow-only-tags.golden.json")
@@ -130,7 +132,8 @@ func TestWorkflowOnlyTagsRenderGolden(t *testing.T) {
 	assert.JSONEq(t, string(want), string(got))
 
 	// Nothing but the workflow: no team, no organization admin.
-	rs := registry.WorkflowOnlyTagsRulesetFor([]string{"x/v*"})
+	rs := registry.WorkflowOnlyTagsRulesetFor([]string{"x/v*"}, 424242)
 	require.Len(t, rs.BypassActors, 1)
 	assert.Equal(t, "Integration", rs.BypassActors[0].ActorType)
+	assert.Equal(t, 424242, rs.BypassActors[0].ActorID)
 }
