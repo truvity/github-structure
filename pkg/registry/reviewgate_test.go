@@ -70,6 +70,27 @@ func TestReviewGate(t *testing.T) {
 		}
 	})
 
+	// The knob rides on the gate and nowhere else: unset renders the
+	// ruleset exactly as before, so a repo that never asks sees no diff.
+	t.Run("dismiss stale reviews follows the resolved flag", func(t *testing.T) {
+		t.Parallel()
+
+		off := registry.ReviewGate(registry.Resolved{Review: registry.ReviewRequired})
+		if off == nil || off.DismissStaleReviewsOnPush {
+			t.Fatalf("unset flag rendered %+v, want a gate without dismissal", off)
+		}
+
+		on := registry.ReviewGate(registry.Resolved{Review: registry.ReviewRequired, ReviewDismissStale: true})
+		if on == nil || !on.DismissStaleReviewsOnPush {
+			t.Fatalf("flag set rendered %+v, want dismissal on", on)
+		}
+
+		// With no gate there is nothing to carry it.
+		if got := registry.ReviewGate(registry.Resolved{Review: registry.ReviewNone, ReviewDismissStale: true}); got != nil {
+			t.Fatalf("review: none synthesised %+v", got)
+		}
+	})
+
 	// Where classic protection is off, the ruleset is the only thing
 	// left to carry the required checks -- so it carries them, and a
 	// repository does not silently lose its check gate by turning

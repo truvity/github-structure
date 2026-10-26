@@ -42,6 +42,11 @@ type (
 		// wins over its preset.
 		Review string
 
+		// ReviewDismissStale is whether the `review: required` gate
+		// dismisses an approval when commits are pushed: the repo row's
+		// value, else its preset's, else false.
+		ReviewDismissStale bool
+
 		Actions    ResolvedActions
 		Protection ResolvedProtection
 
@@ -122,6 +127,7 @@ func (c *Config) Resolve(repo *Repo) Resolved {
 		Archived:            repo.Archived,
 		Teams:               c.effectiveTeams(repo),
 		Review:              reviewOf(repo, preset),
+		ReviewDismissStale:  reviewDismissStaleOf(repo, preset),
 	}
 
 	if merged.Actions != nil {
@@ -161,6 +167,20 @@ func (c *Config) Resolve(repo *Repo) Resolved {
 	}
 
 	return out
+}
+
+// reviewDismissStaleOf is the gate's dismiss-stale-reviews flag a repo
+// row resolves to: its own value, or its preset's, or false.
+func reviewDismissStaleOf(repo *Repo, preset *RepoSettings) bool {
+	if repo.ReviewDismissStale != nil {
+		return *repo.ReviewDismissStale
+	}
+
+	if preset != nil && preset.ReviewDismissStale != nil {
+		return *preset.ReviewDismissStale
+	}
+
+	return false
 }
 
 // reviewOf is the review gate a repo row resolves to: its own value, or
@@ -494,6 +514,8 @@ func ReviewGate(r Resolved) *BranchRuleset {
 		Pattern:           DefaultBranchRef,
 		RequiredApprovals: 1,
 		BypassOrgAdmins:   true,
+
+		DismissStaleReviewsOnPush: r.ReviewDismissStale,
 	}
 
 	// Where classic protection is off, the ruleset is the only thing

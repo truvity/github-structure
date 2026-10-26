@@ -53,7 +53,8 @@ type (
 		Rules []struct {
 			Type       string `json:"type"`
 			Parameters struct {
-				RequiredApprovingReviewCount *int `json:"required_approving_review_count"`
+				RequiredApprovingReviewCount *int  `json:"required_approving_review_count"`
+				DismissStaleReviewsOnPush    *bool `json:"dismiss_stale_reviews_on_push"`
 			} `json:"parameters"`
 		} `json:"rules"`
 	}
@@ -159,6 +160,8 @@ func checkRulesetActors(
 	wantActors := map[string][]string{}
 	// Declared approval counts, for the rulesets that state one.
 	wantApprovals := map[string]int{}
+	// Whether each such ruleset dismisses stale approvals on push.
+	wantDismiss := map[string]bool{}
 
 	for _, rs := range repo.TagRulesets {
 		// The registry names its bypass Apps; GitHub reports database
@@ -205,6 +208,7 @@ func checkRulesetActors(
 
 		if rs.RequiredApprovals > 0 {
 			wantApprovals[rs.Name] = rs.RequiredApprovals
+			wantDismiss[rs.Name] = rs.DismissStaleReviewsOnPush
 		}
 	}
 
@@ -253,11 +257,31 @@ func checkRulesetActors(
 
 		if n, stated := wantApprovals[rs.Name]; stated {
 			live := 0
+			liveDismiss := false
 
 			for _, rule := range detail.Rules {
-				if rule.Type == "pull_request" && rule.Parameters.RequiredApprovingReviewCount != nil {
+				if rule.Type != "pull_request" {
+					continue
+				}
+
+				if rule.Parameters.RequiredApprovingReviewCount != nil {
 					live = *rule.Parameters.RequiredApprovingReviewCount
 				}
+
+				liveDismiss = rule.Parameters.DismissStaleReviewsOnPush != nil &&
+					*rule.Parameters.DismissStaleReviewsOnPush
+			}
+
+			// Compared in BOTH directions: a hand-enabled dismissal the
+			// registry does not declare is exactly what a deploy would
+			// remove, so it is reported before the deploy does it.
+			if liveDismiss != wantDismiss[rs.Name] {
+				drifts = append(drifts, Drift{
+					Subject: "repo " + name + " ruleset " + rs.Name,
+					Field:   "dismiss stale reviews on push",
+					Want:    strconv.FormatBool(wantDismiss[rs.Name]),
+					Got:     strconv.FormatBool(liveDismiss),
+				})
 			}
 
 			if live != n {

@@ -1128,9 +1128,18 @@ func deployBranchRulesets(
 		// devel promotion writes values/versions/devel.yaml by DIRECT
 		// commit, gated by `check` alone, which the Kargo App bypasses.
 		if rs.RequiredApprovals > 0 {
-			rules.PullRequest = &github.RepositoryRulesetRulesPullRequestArgs{
+			pr := &github.RepositoryRulesetRulesPullRequestArgs{
 				RequiredApprovingReviewCount: pulumi.Int(rs.RequiredApprovals),
 			}
+
+			// Set only when asked for, so a ruleset that does not
+			// declare it renders the same inputs it always did and
+			// the provider's own default (false) stands.
+			if rs.DismissStaleReviewsOnPush {
+				pr.DismissStaleReviewsOnPush = pulumi.BoolPtr(true)
+			}
+
+			rules.PullRequest = pr
 		}
 
 		// Required status checks as a RULESET rule (not classic

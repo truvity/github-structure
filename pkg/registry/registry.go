@@ -468,6 +468,22 @@ type (
 		// about the repository; demanding a `reason:` for each would
 		// bury the one field that decides merge mechanics in prose.
 		Review string `yaml:"review,omitempty"`
+		// ReviewDismissStale makes the `review: required` gate dismiss
+		// an approval when new commits are pushed to the pull request
+		// (the ruleset's dismiss_stale_reviews_on_push). Unset inherits
+		// the preset's; both unset is false, the shape every gate had
+		// before the field existed. An explicit false on a row opts it
+		// out of a preset that sets true.
+		//
+		// A row field beside `review`, for the same reason `review`
+		// is one: it is half of what the gate IS, not a settings
+		// deviation. It is NOT `protection.dismiss_stale_reviews` —
+		// that one belongs to classic protection's approval block,
+		// which `review` zeroes, so it is dead letter wherever a gate
+		// is set and reusing it would silently switch dismissal on for
+		// any estate already carrying it there. Setting this without
+		// `review: required` is refused: there is no gate to carry it.
+		ReviewDismissStale *bool `yaml:"review_dismiss_stale,omitempty"`
 		// ChecksWaived suspends the profile's required status checks for
 		// this repo, and its value is the reason.
 		//
@@ -546,6 +562,13 @@ type (
 		// on, blocking its own maintainers' PRs. Set this to keep the
 		// pre-ruleset behavior explicit rather than accidental.
 		BypassOrgAdmins bool `yaml:"bypass_org_admins,omitempty"`
+		// DismissStaleReviewsOnPush dismisses an approval when new
+		// commits are pushed to the pull request. It only applies where
+		// the ruleset requires approvals (RequiredApprovals > 0): the
+		// pull_request rule is not emitted otherwise. For the
+		// synthesised `review: required` gate it comes from
+		// `review_dismiss_stale`.
+		DismissStaleReviewsOnPush bool `yaml:"dismiss_stale_reviews_on_push,omitempty"`
 		// MergeQueue, when present, adds the "require merge queue" rule:
 		// pull requests reach the branch only through GitHub's merge
 		// queue, which builds each entry on top of the ones ahead of it
@@ -640,6 +663,11 @@ type (
 		// guess would state a gate the engine then renders. Repos
 		// deviate on the ROW (`review:`), never in `overrides:`.
 		Review *string `yaml:"review,omitempty"`
+		// ReviewDismissStale is the preset's value for
+		// Repo.ReviewDismissStale; the row wins. Only meaningful with
+		// `review: required`, and refused on a preset that says
+		// otherwise.
+		ReviewDismissStale *bool `yaml:"review_dismiss_stale,omitempty"`
 	}
 
 	// ActionsSettings is the repo's GitHub Actions policy.
@@ -1131,6 +1159,11 @@ func validatePreset(name string, p *RepoSettings) error {
 		}
 	}
 
+	if p.ReviewDismissStale != nil && *p.ReviewDismissStale && (p.Review == nil || *p.Review != ReviewRequired) {
+		return fmt.Errorf("preset %q: review_dismiss_stale needs `review: %s` — it configures that gate,"+
+			" and without one there is nothing to dismiss reviews on", name, ReviewRequired)
+	}
+
 	return nil
 }
 
@@ -1465,6 +1498,12 @@ func (c *Config) validateRepos(login string, org *Org) error {
 				" write `review: %s` next to `preset:`", login, name, *repo.Overrides.Review)
 		}
 
+		// Same reasoning as `review`: a row field, never an override.
+		if repo.Overrides != nil && repo.Overrides.ReviewDismissStale != nil {
+			return fmt.Errorf("org %q repo %q: review_dismiss_stale belongs on the repository row, not in overrides —"+
+				" write it next to `review:`", login, name)
+		}
+
 		for team, perm := range repo.Teams {
 			if _, ok := org.Teams[team]; !ok {
 				return fmt.Errorf("org %q repo %q: grant to unknown team %q", login, name, team)
@@ -1537,6 +1576,11 @@ func (c *Config) validateRepos(login string, org *Org) error {
 					" is read-only and takes no pull requests. Delete the field, or unarchive", login, name)
 			}
 
+			if repo.ReviewDismissStale != nil {
+				return fmt.Errorf("org %q repo %q: archived, so review_dismiss_stale does nothing — an archived"+
+					" repository is read-only and takes no pull requests. Delete the field, or unarchive", login, name)
+			}
+
 			if len(repo.TagRulesets) > 0 {
 				return fmt.Errorf("org %q repo %q: archived, so tag_rulesets do nothing — an archived"+
 					" repository is read-only and takes no tag pushes to restrict. Delete them, or unarchive", login, name)
@@ -1585,6 +1629,16 @@ func (c *Config) validateRepos(login string, org *Org) error {
 // spellings — a classic approval block, a hand-written approval ruleset
 // — cannot sit next to it saying something else.
 func (c *Config) validateReview(login, name string, repo *Repo, resolved Resolved) error {
+	// A dismissal flag with no gate to carry it is a setting that does
+	// nothing; refuse it rather than let it read as protection. A row
+	// that says `review: none` over a preset's `true` must also say
+	// `review_dismiss_stale: false`.
+	if resolved.Review != ReviewRequired && resolved.ReviewDismissStale {
+		return fmt.Errorf("org %q repo %q: review_dismiss_stale is true but review is %q —"+
+			" it configures the `review: %s` gate; set review, or set review_dismiss_stale: false",
+			login, name, resolved.Review, ReviewRequired)
+	}
+
 	if resolved.Review == "" {
 		return nil
 	}
