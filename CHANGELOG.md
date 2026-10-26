@@ -4,6 +4,10 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.16.4 — 2026-10-26
+
+- Dependency updates.
+
 ## v0.16.3 — 2026-10-21
 
 - Dependency updates.
