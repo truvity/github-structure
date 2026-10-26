@@ -44,6 +44,20 @@ func TestReviewGate(t *testing.T) {
 				BypassOrgAdmins:   true,
 			},
 		},
+		"required with dismiss-stale: the ruleset dismisses approvals on push": {
+			repo: registry.Resolved{
+				Review:             registry.ReviewRequired,
+				ReviewDismissStale: true,
+				Protection:         registry.ResolvedProtection{Enabled: true, RequiredChecks: []string{"check"}},
+			},
+			want: &registry.BranchRuleset{
+				Name:                      registry.ReviewRulesetName,
+				Pattern:                   defaultBranchRef,
+				RequiredApprovals:         1,
+				BypassOrgAdmins:           true,
+				DismissStaleReviewsOnPush: true,
+			},
+		},
 		"required with no classic rule: the ruleset is the only place the checks can live": {
 			repo: registry.Resolved{
 				Review:     registry.ReviewRequired,

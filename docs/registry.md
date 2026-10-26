@@ -63,6 +63,11 @@ orgs:
                                   # preset's. No reason: required — which
                                   # repos need a reviewed merge is a fact
                                   # about them, not a settings deviation.
+        review_dismiss_stale: true  # optional; the review: required gate
+                                  # dismisses an approval when commits are
+                                  # pushed. Also allowed on a profile; the
+                                  # row wins, false opts out. Refused
+                                  # without review: required.
         description: …            # optional; written to GitHub
         homepage: https://…       # optional; absolute https URL, written
                                   # to GitHub. Unset = empty, as before
@@ -283,6 +288,17 @@ Sharp edges, all enforced by the loader:
   the value comes from the preset and the number from an override, which
   would otherwise drop an approval requirement silently.
 - It lives on the repository ROW, never in `overrides:`.
+- `review_dismiss_stale: true` (row, or profile with the row winning)
+  adds `dismiss_stale_reviews_on_push` to the rendered ruleset: pushing
+  new commits to a pull request dismisses its approvals. Unset renders
+  nothing extra. It is its own key rather than
+  `protection.dismiss_stale_reviews`, which is classic protection's
+  approval block — the very block `review` zeroes — so reusing it would
+  turn dismissal on for any registry that carries it there today. The
+  loader refuses it without `review: required`, in `overrides:` and on
+  an archived repository, and `github-drift` compares the live flag both
+  ways. A hand-written `branch_rulesets` row takes the same setting as
+  `dismiss_stale_reviews_on_push: true`.
 - It is rejected on an archived repository: no branch, no pull requests.
 - The rendered ruleset is named `pr-approval`, which is what hand-written
   approval rulesets were already called — so adopting the field UPDATES

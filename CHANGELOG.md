@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.17.0 — 2026-10-27
+
+### Added
+
+- **`review_dismiss_stale`: the `review: required` gate can dismiss approvals on push.** A repository row (or a profile, row wins) takes an optional `review_dismiss_stale: true`, rendered as the `pr-approval` ruleset's `dismiss_stale_reviews_on_push`; an explicit `false` on a row opts out of a profile's `true`. Hand-written `branch_rulesets` entries take the same setting as `dismiss_stale_reviews_on_push: true`. Unset renders exactly the inputs it always did, so no existing repository plans a diff. The loader refuses it without `review: required` (nothing carries it), in `overrides:`, and on an archived repository. It is a separate key from `protection.dismiss_stale_reviews` on purpose: that one belongs to classic protection's approval block, which `review` zeroes, so it is ignored wherever a gate is set and reusing it would silently switch dismissal on for any registry that already carries it there. `github-drift` now compares the live rule's dismissal flag in both directions, so a hand-enabled dismissal the registry does not declare is reported, and a deploy that would remove it is no surprise.
+
 ## v0.16.4 — 2026-10-26
 
 - Dependency updates.
