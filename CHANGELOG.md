@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Added
+
+- **`pkg/cli`: the operator command line, as a package an estate wires instead of copies.** `cli.Run(ctx, cli.Config{...}, args)` provides `drift` (every read-only comparison of the registry against live GitHub, in a fixed order, one line per finding, a summary line when clean, non-zero on any drift), `entitlements apply` (declared Actions variables first, then selected-repo scopes; the order is load-bearing, see the doc comment) and `preflight` (selects the structure stack and hands it to `pkg/preflight`). Particulars are `Config` inputs: `Registry` (an `fs.FS` holding `github.yaml`), `DefaultOrg`, `TeamFillable` (which teams a roster refills), `Stack` (how the org's already-initialised stack is selected; nil disables `preflight` with a clear error), and `Extra` commands that receive the org and the loaded registry. Standard-library `flag`, like `cmd/github-structure`; `--org` goes before the command. Exit codes: 0 success, 1 failure or drift, 2 usage. No new dependency.
+
 ## v0.17.0 — 2026-10-27
 
 ### Added
