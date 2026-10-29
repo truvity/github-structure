@@ -130,6 +130,31 @@ func TestReviewRejectsHandWrittenApprovalRuleset(t *testing.T) {
 	assert.Contains(t, err.Error(), "both require approvals")
 }
 
+// Under `review: none` an approval ruleset is accepted when it names a
+// bypass App — the direct-pushing writer `required` cannot exempt — and
+// refused without one, because then `review: required` says the same.
+func TestReviewNoneAcceptsApprovalRulesetOnlyWithBypassApp(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        review: none
+        branch_rulesets:
+          - name: master-check
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 1
+            required_checks: [check]
+            bypass_apps: [acme-releases]
+            bypass_org_admins: true
+`, 1)
+
+	_, err := load(t, body)
+	require.NoError(t, err)
+
+	noApp := strings.Replace(body, "            bypass_apps: [acme-releases]\n", "            bypass_apps: []\n", 1)
+
+	_, err = load(t, noApp)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no bypass_apps")
+}
+
 // A checks-only ruleset is legitimate next to `review` — it is how an
 // App direct-pushes past CI — unless it takes the name the field
 // renders, which would be two declarations of one ruleset.

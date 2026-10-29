@@ -48,7 +48,9 @@ Every repository's default branch is gated by the contexts its preset
 requires, and its REVIEW is one row field with two values:
 
 - `review: none` — the checks alone; an automated pull request completes
-  on green through GitHub's own auto-merge.
+  on green through GitHub's own auto-merge. A repository whose default
+  branch an App writes by direct push may still require approvals, in a
+  hand-written branch ruleset that names that App as a bypass.
 - `review: required` — one approving review, from a person or from an
   App with `pull_requests: write` (GitHub counts both), rendered as a
   ruleset because only a ruleset can exempt organization admins.

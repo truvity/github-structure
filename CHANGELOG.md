@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Changed
+
+- **`review: none` accepts a hand-written approval ruleset that names `bypass_apps`.** Until now the loader refused any `branch_rulesets` row with `required_approvals > 0` beside any `review` value. It still refuses one beside `review: required`, which renders that gate itself. Under `review: none` it is now accepted when the row names at least one bypass App, and refused without one, because then `review: required` says the same thing. The shape is for a default branch that an App writes by direct push (a Kargo promotion App): such writes have no pull request to approve, and the `required` gate has no App bypass. No rendering changes, so registries that loaded before plan no diff.
+
 ## v0.18.0 — 2026-10-28
 
 ### Added

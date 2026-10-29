@@ -49,7 +49,10 @@ const (
 const (
 	// ReviewNone asks for no approving review: the default branch is
 	// gated by its required checks alone, and an automated pull request
-	// completes on green through GitHub's own auto-merge.
+	// completes on green through GitHub's own auto-merge. The one
+	// exception is a hand-written branch ruleset that requires approvals
+	// AND names bypass_apps: an App that direct-pushes the default branch
+	// needs a bypass, which the `required` gate does not carry.
 	ReviewNone = "none"
 	// ReviewRequired asks for one approving review — from a human or
 	// from an App with pull_requests: write, both of which GitHub counts
@@ -1666,10 +1669,21 @@ func (c *Config) validateReview(login, name string, repo *Repo, resolved Resolve
 			continue
 		}
 
-		if rs.RequiredApprovals > 0 {
+		if rs.RequiredApprovals > 0 && resolved.Review == ReviewRequired {
 			return fmt.Errorf("org %q repo %q: review %q and branch ruleset %q both require approvals —"+
 				" delete the ruleset row; `review: %s` renders it", login, name,
 				resolved.Review, rs.Name, ReviewRequired)
+		}
+
+		// Under `review: none` a hand-written approval gate is allowed for
+		// the one thing `review: required` cannot say: an App that writes
+		// the default branch by direct push (gitops' Kargo promotion App)
+		// and so has no pull request to approve. Without such an App the
+		// row should say `review: required` instead.
+		if rs.RequiredApprovals > 0 && len(rs.BypassApps) == 0 {
+			return fmt.Errorf("org %q repo %q: branch ruleset %q requires approvals with no bypass_apps under review %q —"+
+				" use `review: %s`; a hand-written approval gate exists only for an App that direct-pushes",
+				login, name, rs.Name, resolved.Review, ReviewRequired)
 		}
 
 		if rs.Name == ReviewRulesetName {
