@@ -287,6 +287,12 @@ Sharp edges, all enforced by the loader:
   hand-written approval ruleset is rejected — including the case where
   the value comes from the preset and the number from an override, which
   would otherwise drop an approval requirement silently.
+- The one exception: under `review: none`, a hand-written
+  `branch_rulesets` row may require approvals when it names
+  `bypass_apps`. That is the shape for a default branch that an App
+  writes by direct push (gitops' Kargo promotion App): there is no pull
+  request to approve, and the `required` gate carries no App bypass.
+  Without `bypass_apps` the row must say `review: required` instead.
 - It lives on the repository ROW, never in `overrides:`.
 - `review_dismiss_stale: true` (row, or profile with the row winning)
   adds `dismiss_stale_reviews_on_push` to the rendered ruleset: pushing
