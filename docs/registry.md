@@ -324,7 +324,8 @@ interchangeable (each learned on 2026-08-26):
   review requirement entirely — the ONLY shape **auto-merge** can ride:
   an armed PR completes on green checks alone. A ruleset bypass never
   does this.
-- **Ruleset bypass actors** (`bypass_apps`, `bypass_org_admins`) permit
+- **Ruleset bypass actors** (`bypass_apps`, `bypass_org_admins`,
+  `bypass_teams`) permit
   a *deliberate, audit-visible act* — the "bypass rules" button, or a
   bot pushing a tag. Right for release acts; wrong for anything that
   must complete unattended on a PR.
@@ -343,6 +344,14 @@ interchangeable (each learned on 2026-08-26):
 
   The reading costs the engine App `organization_administration: read`,
   and it is asked for only where some ruleset names a bypass App.
+
+  A branch ruleset also takes `bypass_teams`: org team slugs whose
+  members merge a pull request past the ruleset (its approvals and its
+  checks) without being organization admins, for a standing function
+  that owns the repository. Teams render in bypass mode `pull_request`,
+  not `always`: the bypass is the merge of a pull request anyone can
+  read, and a direct push to the branch stays refused for the team. A
+  slug the org does not declare is a LOAD error.
 - **`enforce_admins: false`** is the blunt escape hatch: admins ignore
   the whole classic rule set. Prefer the two above.
 

@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Added
+
+- **`bypass_teams` on branch rulesets.** A `branch_rulesets` row takes org team slugs whose members may merge a pull request past the ruleset (its approvals and its checks) without being organization admins: a standing function that owns the repository, such as SRE. A team renders as a `Team` bypass actor in mode `pull_request`, not `always`, so it bypasses through a pull request only and a direct push to the branch stays refused for it; the org-admin and App actors keep `always`. A team counts as the ruleset's required bypass. The loader refuses a slug that is not in the org's `teams`, and `github-drift` compares the declared teams with the live actors the way it does for tag rulesets. A row that does not set the field renders the same inputs as before, so no existing registry plans a diff.
+
 ## v0.19.0 — 2026-10-29
 
 ### Changed

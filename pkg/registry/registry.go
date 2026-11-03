@@ -532,7 +532,8 @@ type (
 	}
 
 	// BranchRuleset is one branch-target ruleset row: a PR approval
-	// gate with App bypass (see the field comment on Repo).
+	// gate with App, org-admin or team bypass (see the field comment on
+	// Repo).
 	BranchRuleset struct {
 		// Name is the ruleset's display name, unique within the repo.
 		Name string `yaml:"name"`
@@ -565,6 +566,14 @@ type (
 		// on, blocking its own maintainers' PRs. Set this to keep the
 		// pre-ruleset behavior explicit rather than accidental.
 		BypassOrgAdmins bool `yaml:"bypass_org_admins,omitempty"`
+		// BypassTeams are org team slugs whose members may merge a pull
+		// request past this ruleset (its approvals and its checks)
+		// without being organization admins — a standing function that
+		// owns the repository, such as SRE. Rendered with bypass mode
+		// `pull_request`, not `always`: the team bypasses through a pull
+		// request only, so a direct push to the branch stays refused for
+		// it and the merge stays a pull request anyone can read.
+		BypassTeams []string `yaml:"bypass_teams,omitempty"`
 		// DismissStaleReviewsOnPush dismisses an approval when new
 		// commits are pushed to the pull request. It only applies where
 		// the ruleset requires approvals (RequiredApprovals > 0): the
@@ -1554,7 +1563,7 @@ func (c *Config) validateRepos(login string, org *Org) error {
 			return err
 		}
 
-		if err := validateBranchRulesets(login, name, repo); err != nil {
+		if err := validateBranchRulesets(login, name, org, repo); err != nil {
 			return err
 		}
 
@@ -1793,7 +1802,7 @@ func validateTagRuleset(login, where string, org *Org, rs *TagRuleset, name stri
 // validateBranchRulesets checks one repo's branch_rulesets rows: named,
 // enforcing something, and bypassable — without a bypass the gate
 // belongs in classic protection (see the BranchRuleset field comment).
-func validateBranchRulesets(login, name string, repo *Repo) error {
+func validateBranchRulesets(login, name string, org *Org, repo *Repo) error {
 	for i, rs := range repo.BranchRulesets {
 		switch {
 		case rs == nil || rs.Name == "":
@@ -1803,9 +1812,16 @@ func validateBranchRulesets(login, name string, repo *Repo) error {
 		case rs.RequiredApprovals <= 0 && len(rs.RequiredChecks) == 0 && rs.MergeQueue == nil:
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: required_approvals must be positive"+
 				" or required_checks non-empty — a ruleset enforcing nothing is noise", login, name, rs.Name)
-		case len(rs.BypassApps) == 0 && !rs.BypassOrgAdmins:
-			return fmt.Errorf("org %q repo %q: branch ruleset %q: a bypass is required (bypass_apps"+
-				" or bypass_org_admins) — without one this belongs in classic protection", login, name, rs.Name)
+		case len(rs.BypassApps) == 0 && !rs.BypassOrgAdmins && len(rs.BypassTeams) == 0:
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: a bypass is required (bypass_apps,"+
+				" bypass_org_admins or bypass_teams) — without one this belongs in classic protection", login, name, rs.Name)
+		}
+
+		for _, team := range rs.BypassTeams {
+			if _, ok := org.Teams[team]; !ok {
+				return fmt.Errorf("org %q repo %q: branch ruleset %q: bypass team %q is not in this org's teams",
+					login, name, rs.Name, team)
+			}
 		}
 
 		// See validateTagRulesets: spelling at load, existence at deploy.
