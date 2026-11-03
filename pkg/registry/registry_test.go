@@ -326,6 +326,39 @@ func TestBranchRulesetAcceptsOrgAdminOnlyBypass(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// A team is a bypass of its own: the standing function that owns a
+// repository merges past the gate without being an organization admin.
+func TestBranchRulesetAcceptsTeamOnlyBypass(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: pr-approval
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 1
+            bypass_teams: [engineers]
+`, 1)
+
+	c, err := load(t, body)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"engineers"}, c.Orgs["acme"].Repos["widget"].BranchRulesets[0].BypassTeams)
+}
+
+// A bypass team the org does not declare is refused at load, by name,
+// rather than at deploy as an actor that cannot be resolved.
+func TestBranchRulesetRejectsUnknownBypassTeam(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: pr-approval
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 1
+            bypass_org_admins: true
+            bypass_teams: [ghosts]
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `bypass team "ghosts" is not in this org's teams`)
+}
+
 // A checks-only ruleset (required_approvals 0) is valid when it requires
 // status checks and has a bypass — the shape that lets an App direct-push
 // past CI while everyone else stays gated.

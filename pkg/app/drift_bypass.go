@@ -204,7 +204,7 @@ func checkRulesetActors(
 			return nil, fmt.Errorf("repo %s branch ruleset %s: %w", name, rs.Name, err)
 		}
 
-		wantActors[rs.Name] = declaredBranchActors(rs, appIDs)
+		wantActors[rs.Name] = declaredBranchActors(ctx, org, rs, appIDs, teamIDs)
 
 		if rs.RequiredApprovals > 0 {
 			wantApprovals[rs.Name] = rs.RequiredApprovals
@@ -348,23 +348,29 @@ func declaredTagActors(
 	}
 
 	for _, slug := range rs.BypassTeams {
-		id, ok := teamIDs[slug]
-		if !ok {
-			var team struct {
-				ID int64 `json:"id"`
-			}
-
-			if err := ghAPI(ctx, "/orgs/"+org+"/teams/"+slug, &team); err == nil {
-				id = team.ID
-			}
-
-			teamIDs[slug] = id
-		}
-
-		actors = append(actors, "Team:"+strconv.FormatInt(id, 10))
+		actors = append(actors, teamActor(ctx, org, slug, teamIDs))
 	}
 
 	return actors
+}
+
+// teamActor is a team's bypass actor in the live vocabulary (Team:id),
+// its database id resolved through the API once and cached in teamIDs.
+func teamActor(ctx context.Context, org, slug string, teamIDs map[string]int64) string {
+	id, ok := teamIDs[slug]
+	if !ok {
+		var team struct {
+			ID int64 `json:"id"`
+		}
+
+		if err := ghAPI(ctx, "/orgs/"+org+"/teams/"+slug, &team); err == nil {
+			id = team.ID
+		}
+
+		teamIDs[slug] = id
+	}
+
+	return "Team:" + strconv.FormatInt(id, 10)
 }
 
 // declaredRenderedActors is the expected actor set of a ruleset the
@@ -378,8 +384,16 @@ func declaredRenderedActors(rs *registry.RenderedRuleset) []string {
 	return actors
 }
 
-func declaredBranchActors(rs *registry.BranchRuleset, appIDs []int) []string {
-	actors := make([]string, 0, len(appIDs)+1)
+// declaredBranchActors renders a branch ruleset's expected actor set in
+// the live vocabulary (Type:id), teams resolved as declaredTagActors does.
+func declaredBranchActors(
+	ctx context.Context,
+	org string,
+	rs *registry.BranchRuleset,
+	appIDs []int,
+	teamIDs map[string]int64,
+) []string {
+	actors := make([]string, 0, len(rs.BypassTeams)+len(appIDs)+1)
 
 	if rs.BypassOrgAdmins {
 		actors = append(actors, "OrganizationAdmin:0")
@@ -387,6 +401,10 @@ func declaredBranchActors(rs *registry.BranchRuleset, appIDs []int) []string {
 
 	for _, id := range appIDs {
 		actors = append(actors, "Integration:"+strconv.Itoa(id))
+	}
+
+	for _, slug := range rs.BypassTeams {
+		actors = append(actors, teamActor(ctx, org, slug, teamIDs))
 	}
 
 	return actors

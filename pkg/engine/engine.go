@@ -550,7 +550,7 @@ func deployRepos(
 				return fmt.Errorf("repo %s workflow-only tags: %w", name, err)
 			}
 
-			if err := deployBranchRulesets(c, name, live.installedApps, orgCfg.Repos[name].BranchRulesets, provider); err != nil {
+			if err := deployBranchRulesets(c, name, live.installedApps, orgCfg.Repos[name].BranchRulesets, teams, provider); err != nil {
 				return fmt.Errorf("repo %s branch rulesets: %w", name, err)
 			}
 
@@ -1084,6 +1084,7 @@ func deployBranchRulesets(
 	repoName string,
 	installed registry.InstalledApps,
 	rulesets []*registry.BranchRuleset,
+	teams map[string]*github.Team,
 	provider *github.Provider,
 ) error {
 	for _, rs := range rulesets {
@@ -1095,7 +1096,7 @@ func deployBranchRulesets(
 			return fmt.Errorf("branch ruleset %s: %w", rs.Name, err)
 		}
 
-		actors := make(github.RepositoryRulesetBypassActorArray, 0, len(appIDs)+1)
+		actors := make(github.RepositoryRulesetBypassActorArray, 0, len(rs.BypassTeams)+len(appIDs)+1)
 
 		// OrganizationAdmin: GitHub's REST API IGNORES actor_id on write
 		// for this actor type and returns 0 on read — so 0 is the only
@@ -1115,6 +1116,26 @@ func deployBranchRulesets(
 				ActorId:    pulumi.Int(id),
 				ActorType:  pulumi.String("Integration"),
 				BypassMode: pulumi.String("always"),
+			})
+		}
+
+		// Teams bypass through a pull request only (see
+		// BranchRuleset.BypassTeams): a member merges past the approval
+		// and the checks, and a direct push stays refused.
+		for _, slug := range rs.BypassTeams {
+			team, ok := teams[slug]
+			if !ok {
+				// Validation guarantees the team row exists; missing here
+				// means it failed to deploy, which fails the run earlier.
+				return fmt.Errorf("branch ruleset %s: bypass team %q not deployed", rs.Name, slug)
+			}
+
+			actorID := team.ID().ToStringOutput().ApplyT(strconv.Atoi).(pulumi.IntOutput)
+
+			actors = append(actors, github.RepositoryRulesetBypassActorArgs{
+				ActorId:    actorID,
+				ActorType:  pulumi.String("Team"),
+				BypassMode: pulumi.String("pull_request"),
 			})
 		}
 
@@ -1233,7 +1254,7 @@ func deployReviewGate(
 		return nil
 	}
 
-	return deployBranchRulesets(c, name, installed, []*registry.BranchRuleset{gate}, provider)
+	return deployBranchRulesets(c, name, installed, []*registry.BranchRuleset{gate}, nil, provider)
 }
 
 // reviewGate is the ruleset a resolved repo's review value asks for, or
