@@ -98,6 +98,59 @@ The delete half removes the branch's protection, and the following diff
 reads clean. On 2026-07-29 two repositories in the source estate were
 found with no protection at all while the stack reported no drift.
 
+## Renaming a repository row is a state operation, not a registry edit
+
+Every per-repository resource is named after the repository:
+`repo-<name>`, `actions-<name>`, `workflow-perms-<name>`,
+`protection-<name>`, `ruleset-<name>-<ruleset>` and
+`grant-<team>-<name>`. The name is part of each URN, so renaming the row
+and nothing else plans a create of every one of them under the new name
+and a delete of every one under the old. The repository's delete is
+refused only because it is protected. Its protection, rulesets and grants
+are not protected.
+
+The route that plans nothing is, in this order:
+
+1. Rename the repository on GitHub (`gh repo rename`). The repository id,
+   node id, history and rulesets stay.
+2. Rename the row in the registry.
+3. Re-key the state. Move every URN that carries the old name to the new
+   name. Then move the name as a whole token (`<org>/<old>`,
+   `<team-id>:<old>`, `.../<old>.git`) in the same resources' ids, import
+   ids, inputs and outputs, and leave free text such as the description
+   alone.
+4. `pulumi preview --refresh` must plan no create, delete, replace or
+   update. Only then deploy.
+
+Each of the three re-keyed parts is needed:
+
+- **URNs.** Without them, the plan deletes and creates.
+- **Import ids.** Check-then-import declares the new name. An old import
+  id makes it an import-replacement of the repository.
+- **Outputs.** A grant's `repository` forces a new grant. A stale one
+  replaces every grant, and the other settings update.
+
+The ids are not visible to a preview without refresh. They matter for
+every read and write afterwards, because a stale id resolves through
+GitHub's redirect from the old name. That works only until a repository
+with the old name exists again.
+
+There is deliberately no `renamed_from` field that would alias the old
+names. With this provider, aliases alone are not a rename:
+
+- **Before the GitHub rename.** The repository, its Actions settings and
+  its rulesets do update in place. But every team grant is replaced. The
+  delete addresses the old name, and if GitHub redirects that to the
+  renamed repository, the team is left with no access. The workflow
+  permissions also drop out of state.
+- **After the GitHub rename.** The import id mismatch replaces the
+  repository.
+
+`pkg/engine/rename_plan_test.go` proves each of these statements against
+the real Pulumi engine and the real provider. It runs `pulumi preview` on
+a local backend, with the provider pointed at a fake GitHub that accepts
+no write, and it skips when the `pulumi` CLI is not on `PATH`.
+
 ## The create path is the untested path
 
 Every resource in an adopted estate was imported, so the create branches
