@@ -115,18 +115,27 @@ The route that plans nothing is, in this order:
    node id, history and rulesets stay.
 2. Rename the row in the registry.
 3. Re-key the state. Move every URN that carries the old name to the new
-   name. Then move the name as a whole token (`<org>/<old>`,
-   `<team-id>:<old>`, `.../<old>.git`) in the same resources' ids, import
-   ids, inputs and outputs, and leave free text such as the description
-   alone.
+   name, including every reference to those URNs in other resources'
+   `dependencies`, `propertyDependencies`, `parent` and `deletedWith`.
+   Then move the name as a whole token (`<org>/<old>`, `<team-id>:<old>`,
+   `.../<old>.git`) in the same resources' ids, import ids, inputs and
+   outputs, and leave free text such as the description alone. Keep the
+   resources in dependency order: each after everything it refers to.
 4. `pulumi preview --refresh` must plan no create, delete, replace or
    update. Only then deploy.
 
-Each of the three re-keyed parts is needed:
+Each of the four re-keyed parts is needed:
 
 - **URNs.** Without them, the plan deletes and creates.
+- **References.** A real state carries dependency edges: the Actions
+  settings, workflow permissions and branch protection depend on the
+  repository, and the grants and the rulesets' team bypass actors on the
+  teams. A reference left on an old URN makes `pulumi stack import`
+  refuse the state ("refers to missing resource"). Do not take its
+  suggested `--force`: it imports the dangling edges.
 - **Import ids.** Check-then-import declares the new name. An old import
-  id makes it an import-replacement of the repository.
+  id makes it an import-replacement of the repository and of its team
+  grants.
 - **Outputs.** A grant's `repository` forces a new grant. A stale one
   replaces every grant, and the other settings update.
 
@@ -146,10 +155,14 @@ names. With this provider, aliases alone are not a rename:
 - **After the GitHub rename.** The import id mismatch replaces the
   repository.
 
-`pkg/engine/rename_plan_test.go` proves each of these statements against
-the real Pulumi engine and the real provider. It runs `pulumi preview` on
-a local backend, with the provider pointed at a fake GitHub that accepts
-no write, and it skips when the `pulumi` CLI is not on `PATH`.
+`pkg/engine/rename_plan_test.go` demonstrates each of these statements
+against the real Pulumi engine and the real provider. It runs
+`pulumi preview` on a local backend, with the provider pointed at a fake
+GitHub that accepts no write. Its seeded state carries the dependency edges the
+engine records, and the test checks that an update writes back the same
+edges. It needs the `pulumi` CLI on `PATH` and skips without it. CI has
+no `pulumi` CLI, so CI does not enforce these statements. Run the test by
+hand when the engine, the provider or the test changes.
 
 ## The create path is the untested path
 
