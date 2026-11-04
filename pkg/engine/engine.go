@@ -1148,9 +1148,25 @@ func deployBranchRulesets(
 		// required_checks non-empty) must NOT force PRs: gitops's Kargo
 		// devel promotion writes values/versions/devel.yaml by DIRECT
 		// commit, gated by `check` alone, which the Kargo App bypasses.
-		if rs.RequiredApprovals > 0 {
+		//
+		// A row may still ask for it with no approvals
+		// (require_pull_request): the branch then takes pull requests
+		// only, with no review count.
+		if rs.RequiredApprovals > 0 || rs.RequirePullRequest {
 			pr := &github.RepositoryRulesetRulesPullRequestArgs{
 				RequiredApprovingReviewCount: pulumi.Int(rs.RequiredApprovals),
+			}
+
+			// Set only when asked for, like the flag below: an empty
+			// list would write "no method allowed" where the row said
+			// nothing.
+			if len(rs.AllowedMergeMethods) > 0 {
+				methods := make(pulumi.StringArray, 0, len(rs.AllowedMergeMethods))
+				for _, m := range rs.AllowedMergeMethods {
+					methods = append(methods, pulumi.String(m))
+				}
+
+				pr.AllowedMergeMethods = methods
 			}
 
 			// Set only when asked for, so a ruleset that does not
@@ -1175,9 +1191,27 @@ func deployBranchRulesets(
 				})
 			}
 
-			rules.RequiredStatusChecks = &github.RepositoryRulesetRulesRequiredStatusChecksArgs{
+			statusChecks := &github.RepositoryRulesetRulesRequiredStatusChecksArgs{
 				RequiredChecks: checks,
 			}
+
+			// Set only when asked for, so the provider's own default
+			// (false) stands for every row that does not say.
+			if rs.StrictChecks {
+				statusChecks.StrictRequiredStatusChecksPolicy = pulumi.BoolPtr(true)
+			}
+
+			rules.RequiredStatusChecks = statusChecks
+		}
+
+		// The two plain rules. Set only when asked for, so a ruleset that
+		// does not declare them renders the same inputs it always did.
+		if rs.BlockDeletion {
+			rules.Deletion = pulumi.BoolPtr(true)
+		}
+
+		if rs.BlockForcePush {
+			rules.NonFastForward = pulumi.BoolPtr(true)
 		}
 
 		// The merge queue rule. Every field is written, defaults filled

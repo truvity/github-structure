@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Added
+
+- **Plain rules, `no_bypass` and pull-request settings on branch rulesets.** A `branch_rulesets` row can now say a ruleset nobody bypasses, and render the rules that need no actor: `block_deletion` (the `deletion` rule), `block_force_push` (`non_fast_forward`), `require_pull_request` (the `pull_request` rule with no approvals, which `required_approvals: 0` never emitted), `allowed_merge_methods` (any of `merge`, `squash`, `rebase`, a setting of the pull_request rule) and `strict_checks` (`strict_required_status_checks_policy` on the required checks). `no_bypass: true` is the explicit form of "no bypass actors": a row that names no bypass and no `no_bypass` is still refused, and `no_bypass` beside a `bypass_*` field is refused too. It is the shape for a non-default branch, which classic protection cannot carry, such as a release line (`pattern: refs/heads/<branch>`). The loader also refuses `allowed_merge_methods` without a pull-request rule, an unknown method, and `strict_checks` without `required_checks`. Every field is opt-in and rendered only when set, so existing rows render the same inputs and plan no diff. Like every branch ruleset the resource is create-only, with no check-then-import: a ruleset already live under that name is adopted once, by hand, with `pulumi import`.
+
 ## v0.20.0 — 2026-11-03
 
 ### Added

@@ -578,6 +578,106 @@ func TestBranchRulesetRejectsNoBypassAtAll(t *testing.T) {
 	assert.Contains(t, err.Error(), "a bypass is required")
 }
 
+// The plain rules and no_bypass load together: a non-default branch,
+// nobody bypassing, rebase-only pull requests with no approvals, strict
+// checks, and the deletion and force-push bans.
+func TestBranchRulesetAcceptsPlainRulesWithNoBypass(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: release-checks
+            pattern: refs/heads/release
+            no_bypass: true
+            block_deletion: true
+            block_force_push: true
+            require_pull_request: true
+            allowed_merge_methods: [rebase]
+            required_checks: [checks]
+            strict_checks: true
+`, 1)
+
+	c, err := load(t, body)
+	require.NoError(t, err)
+
+	rs := c.Orgs["acme"].Repos["widget"].BranchRulesets[0]
+	assert.True(t, rs.NoBypass)
+	assert.True(t, rs.BlockDeletion)
+	assert.True(t, rs.BlockForcePush)
+	assert.True(t, rs.RequirePullRequest)
+	assert.True(t, rs.StrictChecks)
+	assert.Equal(t, []string{"rebase"}, rs.AllowedMergeMethods)
+}
+
+// no_bypass is a statement, so it cannot sit beside the thing it denies.
+func TestBranchRulesetRejectsNoBypassBesideABypass(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: release-checks
+            pattern: refs/heads/release
+            no_bypass: true
+            bypass_org_admins: true
+            block_deletion: true
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no_bypass contradicts")
+}
+
+// A deletion ban alone is a rule, so the ruleset is not "enforcing nothing".
+func TestBranchRulesetPlainRuleAloneIsEnforcement(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: keep-release
+            pattern: refs/heads/release
+            no_bypass: true
+            block_deletion: true
+`, 1)
+
+	_, err := load(t, body)
+	require.NoError(t, err)
+}
+
+// Merge methods are a setting of the pull_request rule and take only the
+// three spellings GitHub knows.
+func TestBranchRulesetMergeMethodsAreChecked(t *testing.T) {
+	row := func(extra string) string {
+		return strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: release-checks
+            pattern: refs/heads/release
+            no_bypass: true
+            block_deletion: true
+`+extra, 1)
+	}
+
+	_, err := load(t, row("            allowed_merge_methods: [rebase]\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "setting of the pull_request rule")
+
+	_, err = load(t, row("            require_pull_request: true\n            allowed_merge_methods: [fast-forward]\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"fast-forward" is not one of`)
+
+	_, err = load(t, row("            require_pull_request: true\n            allowed_merge_methods: [squash, rebase]\n"))
+	require.NoError(t, err)
+}
+
+// Strictness is about a check; with none declared it says nothing.
+func TestBranchRulesetStrictChecksNeedChecks(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: release-checks
+            pattern: refs/heads/release
+            no_bypass: true
+            block_deletion: true
+            strict_checks: true
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "strict_checks needs required_checks")
+}
+
 // ── check waivers ────────────────────────────────────────────
 
 // The profile keeps stating the intent; the waiver drops it for one
