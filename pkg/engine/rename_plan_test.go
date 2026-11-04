@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -44,7 +46,9 @@ import (
 // nothing else. Nothing leaves the machine and no organization is touched.
 //
 // They need the pulumi CLI on PATH and the github provider plugin (the CLI
-// downloads it on first use). Without the CLI they skip, and say so.
+// downloads it on first use). Without the CLI they skip, and say so. CI
+// carries no pulumi CLI, so there they always skip: they are a proof to run
+// locally when the engine, the provider or this file changes, not a gate.
 
 const (
 	renameOrg     = "acme"
@@ -71,6 +75,9 @@ var tfSchemaVersions = map[string]int{ //nolint:gochecknoglobals // fixture
 
 // renameTeamIDs are the numeric ids GitHub gave the two teams.
 var renameTeamIDs = map[string]string{"management": "101", "engineers": "102"} //nolint:gochecknoglobals // fixture
+
+// rulesetIDs are the numeric ids GitHub gave the row's two rulesets.
+var rulesetIDs = map[string]string{"master-check": "9001", "release-tags": "9002"} //nolint:gochecknoglobals // fixture
 
 // renameRegistry is the test registry with its one row named repo and
 // shaped like the platform repository's: branch protection, a branch
@@ -225,6 +232,7 @@ func newHarness(t *testing.T) *harness {
 		func(*pulumi.Context) error { return nil },
 		auto.Project(workspace.Project{Name: tokens.PackageName(renameProject), Runtime: workspace.NewProjectRuntimeInfo("go", nil)}),
 		auto.WorkDir(t.TempDir()),
+		auto.PulumiHome(pulumiHome(t)),
 		auto.EnvVars(map[string]string{
 			"PULUMI_BACKEND_URL":       "file://" + t.TempDir(),
 			"PULUMI_CONFIG_PASSPHRASE": "rename-proof",
@@ -237,6 +245,33 @@ func newHarness(t *testing.T) *harness {
 	require.NoError(t, err)
 
 	return &harness{t: t, stack: stack, gh: gh, apiURL: srv.URL + "/"}
+}
+
+// pulumiHome is a PULUMI_HOME of the test's own, so the CLI's workspace
+// files and logs go away with the test. Its plugins are the user's, so the
+// provider is not downloaded again for every test. It is set on the test
+// process too: the SDK runs `pulumi version` with the process environment.
+func pulumiHome(t *testing.T) string {
+	t.Helper()
+
+	home := t.TempDir()
+
+	userHome := os.Getenv("PULUMI_HOME")
+	if userHome == "" {
+		if dir, err := os.UserHomeDir(); err == nil {
+			userHome = filepath.Join(dir, ".pulumi")
+		}
+	}
+
+	if plugins := filepath.Join(userHome, "plugins"); userHome != "" {
+		if fi, err := os.Stat(plugins); err == nil && fi.IsDir() {
+			require.NoError(t, os.Symlink(plugins, filepath.Join(home, "plugins")))
+		}
+	}
+
+	t.Setenv("PULUMI_HOME", home)
+
+	return home
 }
 
 // step is one planned engine operation on a GitHub resource.
@@ -309,19 +344,147 @@ func (h *harness) urn(typ, name string) string {
 	return fmt.Sprintf("urn:pulumi:%s::%s::%s::%s", renameOrg, renameProject, typ, name)
 }
 
+// edges are the references to other resources a resource is registered
+// with. The engine records them in state as they arrive, and a state
+// re-key has to move every one of them.
+type edges struct {
+	parent      string
+	deps        []string
+	propDeps    map[string][]string
+	deletedWith string
+}
+
+// edgeMocks records the RegisterResource request of every resource the
+// program declares, in the order the SDK sends them.
+type edgeMocks struct {
+	h     *harness
+	mu    sync.Mutex
+	order []string
+	edges map[string]edges
+}
+
+func (m *edgeMocks) NewResource(a pulumi.MockResourceArgs) (string, resource.PropertyMap, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	req := a.RegisterRPC
+	e := edges{
+		parent:      req.GetParent(),
+		deps:        req.GetDependencies(),
+		propDeps:    map[string][]string{},
+		deletedWith: req.GetDeletedWith(),
+	}
+
+	for k, v := range req.GetPropertyDependencies() {
+		e.propDeps[k] = v.GetUrns()
+	}
+
+	urn := m.h.urn(a.TypeToken, a.Name)
+	m.order = append(m.order, urn)
+	m.edges[urn] = e
+
+	// A team's id is read back as a number (a ruleset's bypass actor).
+	if id, ok := renameTeamIDs[strings.TrimPrefix(a.Name, "team-")]; ok && strings.HasSuffix(a.TypeToken, ":Team") {
+		return id, a.Inputs, nil
+	}
+
+	return a.Name + "_id", a.Inputs, nil
+}
+
+func (m *edgeMocks) Call(a pulumi.MockCallArgs) (resource.PropertyMap, error) {
+	return a.Args, nil
+}
+
+// edgesOf runs prog under mocks and returns the edges the SDK registers
+// each resource with, by URN, and the registration order. The SDK sends
+// the same requests to the real engine; only the answers are mocked.
+func (h *harness) edgesOf(prog pulumi.RunFunc) (map[string]edges, []string) {
+	h.t.Helper()
+
+	m := &edgeMocks{h: h, edges: map[string]edges{}}
+	require.NoError(h.t, pulumi.RunErr(prog, pulumi.WithMocks(renameProject, renameOrg, m)))
+
+	return m.edges, m.order
+}
+
+// refs are every URN a resource refers to.
+func (e edges) refs() []string {
+	out := append([]string{}, e.deps...)
+	for _, d := range e.propDeps {
+		out = append(out, d...)
+	}
+
+	if e.parent != "" {
+		out = append(out, e.parent)
+	}
+
+	if e.deletedWith != "" {
+		out = append(out, e.deletedWith)
+	}
+
+	return out
+}
+
+// topoOrder orders urns so that each comes after every resource it refers
+// to, as the engine writes a state; ties keep registration order. The CLI
+// refuses to import a state that refers to a resource before it appears.
+func topoOrder(t *testing.T, urns []string, refs func(string) []string) []string {
+	t.Helper()
+
+	placed := map[string]bool{}
+	out := make([]string, 0, len(urns))
+
+	for len(out) < len(urns) {
+		progress := false
+
+		for _, u := range urns {
+			if placed[u] {
+				continue
+			}
+
+			ready := true
+
+			for _, r := range refs(u) {
+				if !placed[r] && slices.Contains(urns, r) {
+					ready = false
+
+					break
+				}
+			}
+
+			if ready {
+				placed[u] = true
+				out = append(out, u)
+				progress = true
+			}
+		}
+
+		require.True(t, progress, "a cycle among %v", urns)
+	}
+
+	return out
+}
+
 // seedState writes the state the stack would hold after the engine had
 // created and then adopted the row under name: one resource per declared
 // GitHub object, with the provider's planned inputs and outputs, the ids
-// GitHub would have assigned and the import ids the engine declares.
+// GitHub would have assigned, the import ids the engine declares, and the
+// dependency edges and parent the SDK registers it with, in dependency
+// order.
 //
 // Built from a create preview because nothing can be applied here. The
 // control test proves the seed is faithful: previewing the same program
-// against it must plan nothing at all.
+// against it must plan nothing at all, and an update of it writes back
+// the same edges.
 func (h *harness) seedState(reg *registry.Config, orgCfg *registry.Org, name string) {
 	h.t.Helper()
 
 	_, planned, err := h.preview(h.program(reg, orgCfg, liveWith("", nil), nil))
 	require.NoError(h.t, err)
+
+	// The edges of the program as it runs once the row exists live: the
+	// run that wrote the state being seeded.
+	edgesByURN, order := h.edgesOf(h.program(reg, orgCfg, liveWith(name, rowSlugs(reg, orgCfg, name)), nil))
 
 	providerURN := h.urn("pulumi:providers:github", "github-"+renameOrg)
 	providerRef := providerURN + "::" + providerID
@@ -355,18 +518,30 @@ func (h *harness) seedState(reg *registry.Config, orgCfg *registry.Org, name str
 			Custom: true, RetainOnDelete: true, Inputs: wf, Outputs: wf,
 		}
 
-	urns := make([]string, 0, len(planned))
-	for u := range planned {
-		urns = append(urns, u)
+	var urns []string
+
+	for _, u := range order {
+		if s := planned[u]; s != nil && strings.HasPrefix(s.Type, "github:") {
+			urns = append(urns, u)
+		}
 	}
 
-	sort.Strings(urns)
+	var declared []string
+
+	for u, s := range planned {
+		if strings.HasPrefix(s.Type, "github:") {
+			declared = append(declared, u)
+		}
+	}
+
+	require.ElementsMatch(h.t, declared, urns, "the mocked run declares what the preview planned")
+
+	urns = topoOrder(h.t, urns, func(u string) []string { return edgesByURN[u].refs() })
+
+	seeded := 0
 
 	for _, u := range urns {
 		s := planned[u]
-		if !strings.HasPrefix(s.Type, "github:") {
-			continue
-		}
 
 		id, importID := seedIDs(s.Type, urnName(u), name)
 		inputs := resolveUnknowns(s.Inputs)
@@ -403,19 +578,54 @@ func (h *harness) seedState(reg *registry.Config, orgCfg *registry.Org, name str
 			outputs["__meta"] = fmt.Sprintf(`{"schema_version":"%d"}`, v)
 		}
 
-		resources = append(resources, apitype.ResourceV3{
+		e := edgesByURN[u]
+		require.Equal(h.t, stackURN, e.parent, "%s: the engine declares no parent but the stack", u)
+
+		r := apitype.ResourceV3{
 			URN: resource.URN(u), Custom: true, Type: tokens.Type(s.Type),
 			ID: resource.ID(id), ImportID: resource.ID(importID),
 			Inputs: inputs, Outputs: outputs,
-			Parent: resource.URN(stackURN), Provider: providerRef,
+			Parent: resource.URN(e.parent), Provider: providerRef,
 			Protect: s.Protect, RetainOnDelete: s.RetainOnDelete,
-		})
+			Dependencies: urnList(e.deps), DeletedWith: resource.URN(e.deletedWith),
+		}
+
+		if len(e.propDeps) > 0 {
+			r.PropertyDependencies = map[resource.PropertyKey][]resource.URN{}
+			for k, d := range e.propDeps {
+				r.PropertyDependencies[resource.PropertyKey(k)] = urnList(d)
+			}
+		}
+
+		seeded += len(e.deps)
+
+		resources = append(resources, r)
 	}
 
-	h.importState(resources)
+	// Actions, workflow permissions and branch protection take the
+	// repository's outputs, grants and bypass actors the teams' ids: a
+	// seed with no edge would prove a re-key on a state that cannot exist.
+	require.Positive(h.t, seeded, "the seed carries the dependency edges")
+
+	require.NoError(h.t, h.importState(resources))
 }
 
-func (h *harness) importState(resources []apitype.ResourceV3) {
+func urnList(xs []string) []resource.URN {
+	if len(xs) == 0 {
+		return nil
+	}
+
+	out := make([]resource.URN, len(xs))
+	for i, x := range xs {
+		out[i] = resource.URN(x)
+	}
+
+	return out
+}
+
+// importState runs `pulumi stack import`, which checks that every
+// reference in the state names a resource listed before it.
+func (h *harness) importState(resources []apitype.ResourceV3) error {
 	h.t.Helper()
 
 	// The magic cookie is the CLI's tamper check: sha256 of the version.
@@ -427,7 +637,7 @@ func (h *harness) importState(resources []apitype.ResourceV3) {
 	})
 	require.NoError(h.t, err)
 
-	require.NoError(h.t, h.stack.Import(h.t.Context(), apitype.UntypedDeployment{Version: 3, Deployment: raw}))
+	return h.stack.Import(h.t.Context(), apitype.UntypedDeployment{Version: 3, Deployment: raw})
 }
 
 // seedIDs are the id GitHub's provider records for each kind and the
@@ -449,7 +659,7 @@ func seedIDs(typ, resName, repo string) (id, importID string) {
 	case strings.HasSuffix(typ, ":BranchProtection"):
 		return "BPR_fixture", ""
 	case strings.HasSuffix(typ, ":RepositoryRuleset"):
-		return "9" + fmt.Sprint(len(resName)), ""
+		return rulesetIDs[strings.TrimPrefix(resName, "ruleset-"+repo+"-")], ""
 	default:
 		return resName, ""
 	}
@@ -589,11 +799,22 @@ func renameValue(v any, from, to string) any {
 	}
 }
 
+// stale names the parts of the re-key a test leaves out, to prove that
+// each one is needed. The zero value is the whole re-key.
+type stale struct {
+	references bool // other resources' dependencies, parent, deletedWith
+	importIDs  bool
+	outputs    bool
+}
+
 // rekey does to the local state what the consumer's state re-key does to
 // a real one after `gh repo rename`: every resource whose name carries the
-// old repository name gets the new name in its URN, and the name moves in
-// its id, import id, inputs and outputs. Nothing else is touched.
-func (h *harness) rekey(from, to string) {
+// old repository name gets the new name in its URN, and every reference to
+// that URN in another resource (dependencies, property dependencies,
+// parent, deletedWith, provider) moves with it. The name moves as a whole
+// token in the moved resources' ids, import ids, inputs and outputs.
+// Nothing else is touched. It returns what `pulumi stack import` answers.
+func (h *harness) rekey(from, to string, leave stale) error {
 	h.t.Helper()
 
 	exported, err := h.stack.Export(h.t.Context())
@@ -602,7 +823,7 @@ func (h *harness) rekey(from, to string) {
 	var d apitype.DeploymentV3
 	require.NoError(h.t, json.Unmarshal(exported.Deployment, &d))
 
-	moved := 0
+	moved := map[resource.URN]resource.URN{}
 
 	for i := range d.Resources {
 		r := &d.Resources[i]
@@ -613,17 +834,69 @@ func (h *harness) rekey(from, to string) {
 			continue
 		}
 
-		moved++
 		r.URN = resource.URN(u[:strings.LastIndex(u, "::")+2] + n)
+		moved[resource.URN(u)] = r.URN
 		r.ID = resource.ID(renameToken(string(r.ID), from, to))
-		r.ImportID = resource.ID(renameToken(string(r.ImportID), from, to))
 		r.Inputs, _ = renameValue(r.Inputs, from, to).(map[string]any)
-		r.Outputs, _ = renameValue(r.Outputs, from, to).(map[string]any)
+
+		if !leave.importIDs {
+			r.ImportID = resource.ID(renameToken(string(r.ImportID), from, to))
+		}
+
+		if !leave.outputs {
+			r.Outputs, _ = renameValue(r.Outputs, from, to).(map[string]any)
+		}
 	}
 
-	require.Positive(h.t, moved, "nothing carried %q", from)
+	require.NotEmpty(h.t, moved, "nothing carried %q", from)
 
-	h.importState(d.Resources)
+	refs := 0
+
+	if !leave.references {
+		follow := func(u resource.URN) resource.URN {
+			if n, ok := moved[u]; ok {
+				refs++
+
+				return n
+			}
+
+			return u
+		}
+
+		for i := range d.Resources {
+			r := &d.Resources[i]
+			r.Parent = follow(r.Parent)
+			r.DeletedWith = follow(r.DeletedWith)
+
+			for j := range r.Dependencies {
+				r.Dependencies[j] = follow(r.Dependencies[j])
+			}
+
+			for k := range r.PropertyDependencies {
+				for j := range r.PropertyDependencies[k] {
+					r.PropertyDependencies[k][j] = follow(r.PropertyDependencies[k][j])
+				}
+			}
+
+			// A provider reference is "<urn>::<id>".
+			if p, id, ok := cutLast(r.Provider, "::"); ok {
+				r.Provider = string(follow(resource.URN(p))) + "::" + id
+			}
+		}
+
+		require.Positive(h.t, refs, "the state carries references to the moved resources")
+	}
+
+	return h.importState(d.Resources)
+}
+
+func cutLast(s, sep string) (before, after string, found bool) {
+	i := strings.LastIndex(s, sep)
+	if i < 0 {
+		return s, "", false
+	}
+
+	return s[:i], s[i+len(sep):], true
 }
 
 // rowSlugs are the teams the row grants access to.
@@ -700,6 +973,65 @@ func TestRenamePlanControlSeedIsFaithful(t *testing.T) {
 	}
 
 	assert.Empty(t, h.gh.writes(), "a preview writes nothing")
+
+	// The seeded edges are the ones the engine records. An update of the
+	// same program is all `same` steps, so it writes nothing to GitHub;
+	// the engine still writes the state back, with every resource's
+	// dependencies as the program registered them. (In the order its
+	// steps finished, which varies, so only the set is compared.)
+	seeded := h.stateEdges()
+
+	_, err = h.stack.Up(context.WithoutCancel(t.Context()))
+	require.NoError(t, err)
+	assert.ElementsMatch(t, seeded, h.stateEdges(), "the engine writes back the seeded edges")
+	assert.Empty(t, h.gh.writes(), "an all-same update writes nothing")
+}
+
+// stateEdges are the references every resource in the stack's state holds,
+// one line per resource.
+func (h *harness) stateEdges() []string {
+	h.t.Helper()
+
+	exported, err := h.stack.Export(h.t.Context())
+	require.NoError(h.t, err)
+
+	var d apitype.DeploymentV3
+	require.NoError(h.t, json.Unmarshal(exported.Deployment, &d))
+
+	out := make([]string, 0, len(d.Resources))
+
+	for i := range d.Resources {
+		r := &d.Resources[i]
+		deps := make([]string, 0, len(r.Dependencies))
+		for _, u := range r.Dependencies {
+			deps = append(deps, urnName(string(u)))
+		}
+
+		sort.Strings(deps)
+
+		props := make([]string, 0, len(r.PropertyDependencies))
+
+		for k, us := range r.PropertyDependencies {
+			if len(us) == 0 {
+				continue
+			}
+
+			names := make([]string, 0, len(us))
+			for _, u := range us {
+				names = append(names, urnName(string(u)))
+			}
+
+			sort.Strings(names)
+			props = append(props, string(k)+"="+strings.Join(names, ","))
+		}
+
+		sort.Strings(props)
+
+		out = append(out, fmt.Sprintf("%s parent=%s deps=%v props=%v deletedWith=%s",
+			urnName(string(r.URN)), r.Parent, deps, props, r.DeletedWith))
+	}
+
+	return out
 }
 
 // The answer to the question. Renaming the row and nothing else plans a
@@ -737,13 +1069,15 @@ func TestRenamePlanRenamedRowIsDeleteAndCreate(t *testing.T) {
 
 // The proof of the safe route. After the repository is renamed on GitHub,
 // a state re-key -- every URN carrying the old name moved to the new name,
-// and the name moved as a whole token in its id, import id, inputs and
-// outputs -- leaves the renamed row planning nothing at all: no create, no
-// delete, no replace, no update. That is the contract a consumer's state
-// re-key tool must meet.
+// every other resource's reference to it (dependencies, property
+// dependencies, parent, deletedWith) moved with it, and the name moved as
+// a whole token in its id, import id, inputs and outputs -- leaves the
+// renamed row planning nothing at all: no create, no delete, no replace,
+// no update. That is the contract a consumer's state re-key tool must
+// meet.
 func TestRenamePlanRekeyedStatePlansNothing(t *testing.T) {
 	h, reg, orgCfg, grants := renameCase(t)
-	h.rekey(oldRepo, newRepo)
+	require.NoError(t, h.rekey(oldRepo, newRepo, stale{}))
 
 	steps, _, err := h.preview(h.program(reg, orgCfg, liveWith(newRepo, grants), nil))
 	logPlan(t, "row renamed, state re-keyed, GitHub renamed", steps, err)
@@ -755,6 +1089,59 @@ func TestRenamePlanRekeyedStatePlansNothing(t *testing.T) {
 	}
 
 	assert.Empty(t, h.gh.writes(), "a preview writes nothing")
+}
+
+// Each part of the re-key is needed. Leave one out and the result is
+// refused or plans a replacement.
+func TestRenamePlanRekeyNeedsEveryPart(t *testing.T) {
+	t.Run("references", func(t *testing.T) {
+		// Other resources still name the old URNs in their dependencies:
+		// the CLI refuses the state, and its suggested --force would
+		// import dangling edges.
+		h, _, _, _ := renameCase(t)
+
+		err := h.rekey(oldRepo, newRepo, stale{references: true})
+		require.Error(t, err)
+		t.Logf("stack import: %v", err)
+		assert.Contains(t, err.Error(), "refers to missing resource")
+		assert.Contains(t, err.Error(), "repo-"+oldRepo)
+	})
+
+	t.Run("import ids", func(t *testing.T) {
+		h, reg, orgCfg, grants := renameCase(t)
+		require.NoError(t, h.rekey(oldRepo, newRepo, stale{importIDs: true}))
+
+		steps, _, err := h.preview(h.program(reg, orgCfg, liveWith(newRepo, grants), nil))
+		logPlan(t, "re-keyed, import ids left stale", steps, err)
+
+		// The fake GitHub has no repository to read, so the preview stops
+		// at the import; the op it planned is the finding.
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "resource '"+newRepo+"' does not exist", "the import's read is what stops it")
+		assert.Equal(t, "import-replacement", planOf(steps)["repo-"+newRepo],
+			"an import id mismatch replaces the repository")
+		assert.Empty(t, h.gh.writes(), "a preview writes nothing")
+	})
+
+	t.Run("outputs", func(t *testing.T) {
+		h, reg, orgCfg, grants := renameCase(t)
+		require.NoError(t, h.rekey(oldRepo, newRepo, stale{outputs: true}))
+
+		steps, _, err := h.preview(h.program(reg, orgCfg, liveWith(newRepo, grants), nil))
+		logPlan(t, "re-keyed, outputs left stale", steps, err)
+		require.NoError(t, err)
+
+		plan := planOf(steps)
+		for _, slug := range grants {
+			assert.Contains(t, plan["grant-"+slug+"-"+newRepo], "replace", "a stale repository output forces a new grant")
+		}
+
+		for _, n := range []string{"repo-%s", "actions-%s", "workflow-perms-%s", "ruleset-%s-master-check", "ruleset-%s-release-tags"} {
+			assert.Equal(t, "update", plan[fmt.Sprintf(n, newRepo)], n)
+		}
+
+		assert.Empty(t, h.gh.writes(), "a preview writes nothing")
+	})
 }
 
 // Why the engine has no `renamed_from` alias field. Aliasing every renamed
@@ -774,8 +1161,9 @@ func TestRenamePlanRekeyedStatePlansNothing(t *testing.T) {
 //     repository.
 //
 // If the provider ever stops forcing a new grant on a repository change,
-// the first half of this test fails, and an alias field is worth another
-// look.
+// the first half of this test fails when run with the pulumi CLI, and an
+// alias field is worth another look. CI skips it, so a provider bump is
+// the moment to run it by hand.
 func TestRenamePlanAliasesAloneAreNotARename(t *testing.T) {
 	t.Run("before the GitHub rename", func(t *testing.T) {
 		h, reg, orgCfg, grants := renameCase(t)
@@ -795,6 +1183,7 @@ func TestRenamePlanAliasesAloneAreNotARename(t *testing.T) {
 		}
 
 		assert.Equal(t, "delete", plan["workflow-perms-"+oldRepo])
+		assert.Empty(t, h.gh.writes(), "a preview writes nothing")
 	})
 
 	t.Run("after the GitHub rename", func(t *testing.T) {
@@ -806,7 +1195,9 @@ func TestRenamePlanAliasesAloneAreNotARename(t *testing.T) {
 		// The fake GitHub has no repository to read, so the preview stops
 		// at the import; the op it planned is the finding.
 		require.Error(t, err)
+		assert.Contains(t, err.Error(), "resource '"+newRepo+"' does not exist", "the import's read is what stops it")
 		assert.Equal(t, "import-replacement", planOf(steps)["repo-"+newRepo],
 			"an import id mismatch replaces the repository")
+		assert.Empty(t, h.gh.writes(), "a preview writes nothing")
 	})
 }
