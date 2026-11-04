@@ -13,6 +13,6 @@ permissions:
 
 jobs:
   govulncheck:
-    uses: truvity/ci-workflows/.github/workflows/check.yaml@a15740fdccb59ef139f6eb974f0ea052cfcc28bb # v5.10.0
+    uses: truvity/ci-workflows/.github/workflows/check.yaml@73ba38508f51c1e870f8981e6498c6c50d412e98 # v5.11.0
     with:
       recipes: '["vuln"]'
