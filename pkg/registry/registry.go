@@ -581,6 +581,35 @@ type (
 		// synthesised `review: required` gate it comes from
 		// `review_dismiss_stale`.
 		DismissStaleReviewsOnPush bool `yaml:"dismiss_stale_reviews_on_push,omitempty"`
+		// NoBypass declares, deliberately, that nobody bypasses this
+		// ruleset: not an App, not an organization admin, not a team.
+		// Without it a row naming no bypass is refused, because a gate
+		// nobody can step over usually belongs in classic protection or
+		// is a forgotten field. It is the shape for a non-default
+		// branch, which classic protection (default branch only) cannot
+		// carry. Mutually exclusive with every bypass_* field.
+		NoBypass bool `yaml:"no_bypass,omitempty"`
+		// RequirePullRequest adds the pull_request rule even where no
+		// approvals are required (RequiredApprovals 0): the branch then
+		// takes changes through pull requests only, with no review
+		// count. Implied by RequiredApprovals > 0.
+		RequirePullRequest bool `yaml:"require_pull_request,omitempty"`
+		// AllowedMergeMethods restricts how a pull request may land:
+		// any of merge, squash, rebase. Empty leaves the provider's
+		// default (all three) alone. It is a setting of the
+		// pull_request rule, so it needs RequiredApprovals > 0 or
+		// RequirePullRequest.
+		AllowedMergeMethods []string `yaml:"allowed_merge_methods,omitempty"`
+		// StrictChecks makes the required status checks strict: a pull
+		// request must be up to date with the branch before it merges
+		// (strict_required_status_checks_policy). Needs RequiredChecks.
+		StrictChecks bool `yaml:"strict_checks,omitempty"`
+		// BlockDeletion adds the deletion rule: the branch cannot be
+		// deleted.
+		BlockDeletion bool `yaml:"block_deletion,omitempty"`
+		// BlockForcePush adds the non_fast_forward rule: the branch
+		// cannot be force-pushed.
+		BlockForcePush bool `yaml:"block_force_push,omitempty"`
 		// MergeQueue, when present, adds the "require merge queue" rule:
 		// pull requests reach the branch only through GitHub's merge
 		// queue, which builds each entry on top of the ones ahead of it
@@ -1809,12 +1838,31 @@ func validateBranchRulesets(login, name string, org *Org, repo *Repo) error {
 			return fmt.Errorf("org %q repo %q: branch_rulesets[%d]: name is required", login, name, i)
 		case rs.Pattern == "":
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: pattern is required", login, name, rs.Name)
-		case rs.RequiredApprovals <= 0 && len(rs.RequiredChecks) == 0 && rs.MergeQueue == nil:
-			return fmt.Errorf("org %q repo %q: branch ruleset %q: required_approvals must be positive"+
-				" or required_checks non-empty — a ruleset enforcing nothing is noise", login, name, rs.Name)
-		case len(rs.BypassApps) == 0 && !rs.BypassOrgAdmins && len(rs.BypassTeams) == 0:
+		case !rs.enforcesSomething():
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: required_approvals must be positive,"+
+				" required_checks non-empty, or a rule (require_pull_request, block_deletion,"+
+				" block_force_push, merge_queue) set — a ruleset enforcing nothing is noise", login, name, rs.Name)
+		case rs.NoBypass && rs.hasBypass():
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: no_bypass contradicts the bypass_apps,"+
+				" bypass_org_admins or bypass_teams it also names — keep one", login, name, rs.Name)
+		case !rs.NoBypass && !rs.hasBypass():
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: a bypass is required (bypass_apps,"+
-				" bypass_org_admins or bypass_teams) — without one this belongs in classic protection", login, name, rs.Name)
+				" bypass_org_admins or bypass_teams) — without one this belongs in classic protection."+
+				" A ruleset nobody may bypass, on a branch classic protection cannot reach, says"+
+				" `no_bypass: true`", login, name, rs.Name)
+		case len(rs.AllowedMergeMethods) > 0 && !rs.requiresPullRequest():
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: allowed_merge_methods is a setting of the"+
+				" pull_request rule — add require_pull_request: true or required_approvals", login, name, rs.Name)
+		case rs.StrictChecks && len(rs.RequiredChecks) == 0:
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: strict_checks needs required_checks —"+
+				" there is no check to be strict about", login, name, rs.Name)
+		}
+
+		for _, method := range rs.AllowedMergeMethods {
+			if !validMergeMethods[method] {
+				return fmt.Errorf("org %q repo %q: branch ruleset %q: allowed_merge_methods %q is not one of"+
+					" merge, squash, rebase", login, name, rs.Name, method)
+			}
 		}
 
 		for _, team := range rs.BypassTeams {
@@ -1835,6 +1883,27 @@ func validateBranchRulesets(login, name string, org *Org, repo *Repo) error {
 	}
 
 	return nil
+}
+
+// validMergeMethods are the spellings a pull_request rule's
+// allowed_merge_methods takes, lower-case as GitHub writes them.
+var validMergeMethods = map[string]bool{"merge": true, "squash": true, "rebase": true}
+
+// requiresPullRequest reports whether the ruleset carries the pull_request
+// rule: approvals ask for it, or the row says so with no approvals.
+func (rs *BranchRuleset) requiresPullRequest() bool {
+	return rs.RequiredApprovals > 0 || rs.RequirePullRequest
+}
+
+// hasBypass reports whether the ruleset names any bypass actor.
+func (rs *BranchRuleset) hasBypass() bool {
+	return len(rs.BypassApps) > 0 || rs.BypassOrgAdmins || len(rs.BypassTeams) > 0
+}
+
+// enforcesSomething reports whether the ruleset renders at least one rule.
+func (rs *BranchRuleset) enforcesSomething() bool {
+	return rs.requiresPullRequest() || len(rs.RequiredChecks) > 0 ||
+		rs.BlockDeletion || rs.BlockForcePush || rs.MergeQueue != nil
 }
 
 // BypassAppIDs resolves ruleset bypass App names to the GitHub App

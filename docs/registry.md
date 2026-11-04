@@ -352,6 +352,19 @@ interchangeable (each learned on 2026-08-26):
   not `always`: the bypass is the merge of a pull request anyone can
   read, and a direct push to the branch stays refused for the team. A
   slug the org does not declare is a LOAD error.
+  A branch ruleset can also be declared with NO bypass, deliberately:
+  `no_bypass: true`. That is the shape for a branch classic protection
+  cannot carry (it covers the default branch only), such as a release
+  line, and it is refused beside any `bypass_*` field. A row that names
+  neither is still an error — a forgotten bypass is more often a mistake
+  than a decision. Beside it, a branch ruleset takes the rules that need
+  no actor, each rendered only when set: `block_deletion` (the `deletion`
+  rule), `block_force_push` (`non_fast_forward`), `require_pull_request`
+  (the `pull_request` rule with no approvals — `required_approvals: 0`
+  alone never emits it, so a checks-only ruleset can still be
+  direct-pushed), `allowed_merge_methods` (`merge`, `squash`, `rebase`;
+  needs the pull-request rule) and `strict_checks` (the branch must be up
+  to date before a pull request merges; needs `required_checks`).
 - **`enforce_admins: false`** is the blunt escape hatch: admins ignore
   the whole classic rule set. Prefer the two above.
 
