@@ -1176,6 +1176,12 @@ func deployBranchRulesets(
 				pr.DismissStaleReviewsOnPush = pulumi.BoolPtr(true)
 			}
 
+			// Set only when asked for, for the same reason: every row
+			// that does not declare it keeps the inputs it always had.
+			if rs.RequireCodeOwnerReview {
+				pr.RequireCodeOwnerReview = pulumi.BoolPtr(true)
+			}
+
 			rules.PullRequest = pr
 		}
 

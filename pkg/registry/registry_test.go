@@ -678,6 +678,44 @@ func TestBranchRulesetStrictChecksNeedChecks(t *testing.T) {
 	assert.Contains(t, err.Error(), "strict_checks needs required_checks")
 }
 
+// Code-owner review loads beside approvals, and beside a pull-request rule
+// with no approvals; the App is the only bypass, so admins are bound too.
+func TestBranchRulesetAcceptsCodeOwnerReview(t *testing.T) {
+	row := func(extra string) string {
+		return strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: owner-approval
+            pattern: ~DEFAULT_BRANCH
+            require_code_owner_review: true
+            no_bypass: true
+`+extra, 1)
+	}
+
+	c, err := load(t, row("            required_approvals: 1\n"))
+	require.NoError(t, err)
+	assert.True(t, c.Orgs["acme"].Repos["widget"].BranchRulesets[0].RequireCodeOwnerReview)
+
+	_, err = load(t, row("            require_pull_request: true\n"))
+	require.NoError(t, err)
+}
+
+// Code-owner review is a setting of the pull_request rule: on a ruleset
+// that renders none (checks only) it would be silently dropped.
+func TestBranchRulesetRejectsCodeOwnerReviewWithoutPullRequestRule(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: owner-approval
+            pattern: ~DEFAULT_BRANCH
+            no_bypass: true
+            required_checks: [check]
+            require_code_owner_review: true
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "require_code_owner_review is a setting of the pull_request rule")
+}
+
 // ── check waivers ────────────────────────────────────────────
 
 // The profile keeps stating the intent; the waiver drops it for one
