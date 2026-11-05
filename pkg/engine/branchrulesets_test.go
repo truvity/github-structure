@@ -194,3 +194,67 @@ func TestDeployBranchRulesetsPlainRulesAreOptIn(t *testing.T) {
 	_, strict := checks["strictRequiredStatusChecksPolicy"]
 	assert.False(t, strict, "strict stays unset unless asked for")
 }
+
+// A code-owner gate renders require_code_owner_review on the pull_request
+// rule beside the approval count. With an App as the only bypass actor it
+// is the shape that binds organization admins too: no OrganizationAdmin
+// actor is rendered, because none was named.
+func TestDeployBranchRulesetsCodeOwnerReview(t *testing.T) {
+	mocks := &captureMocks{seen: map[string]resource.PropertyMap{}}
+
+	err := pulumi.RunErr(func(ctx *pulumi.Context) error {
+		provider, err := github.NewProvider(ctx, "gh", &github.ProviderArgs{})
+		if err != nil {
+			return err
+		}
+
+		return deployBranchRulesets(ctx, "widget", registry.InstalledApps{"acme-writeback": 77},
+			[]*registry.BranchRuleset{{
+				Name:                   "owner-approval",
+				Pattern:                "~DEFAULT_BRANCH",
+				RequiredApprovals:      1,
+				RequireCodeOwnerReview: true,
+				BypassApps:             []string{"acme-writeback"},
+			}},
+			nil, provider)
+	}, pulumi.WithMocks("proj", "stack", mocks))
+	require.NoError(t, err)
+
+	in, ok := mocks.seen["ruleset-widget-owner-approval"]
+	require.True(t, ok, "the ruleset is declared, keyed on repo + name; got %v", mocks.seen)
+
+	actors := in["bypassActors"].ArrayValue()
+	require.Len(t, actors, 1, "the App is the only bypass")
+	assert.Equal(t, "Integration", actors[0].ObjectValue()["actorType"].StringValue())
+
+	pr := in["rules"].ObjectValue()["pullRequest"].ObjectValue()
+	assert.Equal(t, 1.0, pr["requiredApprovingReviewCount"].NumberValue())
+	assert.True(t, pr["requireCodeOwnerReview"].BoolValue())
+}
+
+// An approval ruleset that does not ask for code-owner review renders no
+// such input at all, so every row already deployed plans no diff.
+func TestDeployBranchRulesetsCodeOwnerReviewIsOptIn(t *testing.T) {
+	mocks := &captureMocks{seen: map[string]resource.PropertyMap{}}
+
+	err := pulumi.RunErr(func(ctx *pulumi.Context) error {
+		provider, err := github.NewProvider(ctx, "gh", &github.ProviderArgs{})
+		if err != nil {
+			return err
+		}
+
+		return deployBranchRulesets(ctx, "widget", nil,
+			[]*registry.BranchRuleset{{
+				Name:              "pr-approval",
+				Pattern:           "~DEFAULT_BRANCH",
+				RequiredApprovals: 1,
+				BypassOrgAdmins:   true,
+			}},
+			nil, provider)
+	}, pulumi.WithMocks("proj", "stack", mocks))
+	require.NoError(t, err)
+
+	pr := mocks.seen["ruleset-widget-pr-approval"]["rules"].ObjectValue()["pullRequest"].ObjectValue()
+	_, present := pr["requireCodeOwnerReview"]
+	assert.False(t, present, "requireCodeOwnerReview must not be rendered unasked")
+}

@@ -365,6 +365,14 @@ interchangeable (each learned on 2026-08-26):
   direct-pushed), `allowed_merge_methods` (`merge`, `squash`, `rebase`;
   needs the pull-request rule) and `strict_checks` (the branch must be up
   to date before a pull request merges; needs `required_checks`).
+  `require_code_owner_review: true` requires an approval from a code
+  owner (the repository's CODEOWNERS file) for the paths a pull request
+  changes. It is a setting of the pull-request rule too, so it needs
+  `required_approvals` or `require_pull_request`, and like every rule of
+  a ruleset its bypass actors skip it: a code-owner gate meant to bind
+  organization admins names an App bypass and no `bypass_org_admins`.
+  Classic protection's `protection.require_code_owner_reviews` is a
+  different key on the other mechanism, and `review` zeroes it.
 - **`enforce_admins: false`** is the blunt escape hatch: admins ignore
   the whole classic rule set. Prefer the two above.
 

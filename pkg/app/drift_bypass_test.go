@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"testing"
 
 	registry "github.com/truvity/github-structure/pkg/registry"
@@ -72,5 +73,43 @@ func TestWorkflowOnlyTagsExpectedActors(t *testing.T) {
 		[]string{"Integration:15368", "Team:7", "OrganizationAdmin:0"})
 	if len(d) != 1 || d[0].Got != "extra: OrganizationAdmin:0, Team:7" {
 		t.Fatalf("drift = %+v", d)
+	}
+}
+
+// The live pull_request rule is read for what it enforces: approvals,
+// dismissal and code-owner review. A ruleset without the rule (checks
+// only) reads as zero and false, which is what a declaration without it
+// expects.
+func TestLivePullRequestRule(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body                string
+		approvals           int
+		dismiss, codeOwners bool
+	}{
+		"code-owner gate": {
+			body: `{"rules":[{"type":"pull_request","parameters":{"required_approving_review_count":1,` +
+				`"dismiss_stale_reviews_on_push":false,"require_code_owner_review":true}}]}`,
+			approvals: 1, codeOwners: true,
+		},
+		"plain approval gate": {
+			body:      `{"rules":[{"type":"pull_request","parameters":{"required_approving_review_count":2,"dismiss_stale_reviews_on_push":true}}]}`,
+			approvals: 2, dismiss: true,
+		},
+		"checks only": {
+			body: `{"rules":[{"type":"required_status_checks","parameters":{}}]}`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var d liveRulesetDetail
+			if err := json.Unmarshal([]byte(tc.body), &d); err != nil {
+				t.Fatal(err)
+			}
+
+			approvals, dismiss, codeOwners := d.pullRequestRule()
+			if approvals != tc.approvals || dismiss != tc.dismiss || codeOwners != tc.codeOwners {
+				t.Fatalf("got (%d, %v, %v), want (%d, %v, %v)",
+					approvals, dismiss, codeOwners, tc.approvals, tc.dismiss, tc.codeOwners)
+			}
+		})
 	}
 }

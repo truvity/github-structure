@@ -581,6 +581,14 @@ type (
 		// synthesised `review: required` gate it comes from
 		// `review_dismiss_stale`.
 		DismissStaleReviewsOnPush bool `yaml:"dismiss_stale_reviews_on_push,omitempty"`
+		// RequireCodeOwnerReview requires an approving review from a
+		// code owner (the repository's CODEOWNERS file) for every path a
+		// pull request changes (require_code_owner_review). It is a
+		// setting of the pull_request rule, so it needs
+		// RequiredApprovals > 0 or RequirePullRequest. Bypass actors
+		// still skip it, like every other rule of the ruleset: a
+		// ruleset meant to bind admins too names no bypass_org_admins.
+		RequireCodeOwnerReview bool `yaml:"require_code_owner_review,omitempty"`
 		// NoBypass declares, deliberately, that nobody bypasses this
 		// ruleset: not an App, not an organization admin, not a team.
 		// Without it a row naming no bypass is refused, because a gate
@@ -1853,6 +1861,9 @@ func validateBranchRulesets(login, name string, org *Org, repo *Repo) error {
 		case len(rs.AllowedMergeMethods) > 0 && !rs.requiresPullRequest():
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: allowed_merge_methods is a setting of the"+
 				" pull_request rule — add require_pull_request: true or required_approvals", login, name, rs.Name)
+		case rs.RequireCodeOwnerReview && !rs.requiresPullRequest():
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: require_code_owner_review is a setting of the"+
+				" pull_request rule — add required_approvals or require_pull_request: true", login, name, rs.Name)
 		case rs.StrictChecks && len(rs.RequiredChecks) == 0:
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: strict_checks needs required_checks —"+
 				" there is no check to be strict about", login, name, rs.Name)

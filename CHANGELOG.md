@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Added
+
+- **`require_code_owner_review` on branch rulesets.** A `branch_rulesets` row can now require an approval from a code owner (the repository's CODEOWNERS file), rendered as `require_code_owner_review` on the ruleset's `pull_request` rule. Until now code-owner review existed only as classic protection's `protection.require_code_owner_reviews`, which `review` zeroes and which cannot name an App bypass. Combined with `bypass_apps` and no `bypass_org_admins`, it is a gate organization admins cannot step over while an App still writes the branch by direct push. The loader refuses it on a row with no pull-request rule (no `required_approvals` and no `require_pull_request`), where it would be dropped silently. `github-drift` compares the live flag in both directions, as it does for `dismiss_stale_reviews_on_push`. Unset renders exactly the inputs it always did, so no existing registry plans a diff.
+
 ## v0.21.0 — 2026-11-04
 
 ### Added

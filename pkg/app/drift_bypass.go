@@ -55,6 +55,7 @@ type (
 			Parameters struct {
 				RequiredApprovingReviewCount *int  `json:"required_approving_review_count"`
 				DismissStaleReviewsOnPush    *bool `json:"dismiss_stale_reviews_on_push"`
+				RequireCodeOwnerReview       *bool `json:"require_code_owner_review"`
 			} `json:"parameters"`
 		} `json:"rules"`
 	}
@@ -162,6 +163,8 @@ func checkRulesetActors(
 	wantApprovals := map[string]int{}
 	// Whether each such ruleset dismisses stale approvals on push.
 	wantDismiss := map[string]bool{}
+	// Whether each such ruleset requires a code owner's approval.
+	wantCodeOwner := map[string]bool{}
 
 	for _, rs := range repo.TagRulesets {
 		// The registry names its bypass Apps; GitHub reports database
@@ -206,9 +209,12 @@ func checkRulesetActors(
 
 		wantActors[rs.Name] = declaredBranchActors(ctx, org, rs, appIDs, teamIDs)
 
-		if rs.RequiredApprovals > 0 {
+		// A code-owner gate is compared even at zero approvals
+		// (require_pull_request): the owner approval is what it enforces.
+		if rs.RequiredApprovals > 0 || rs.RequireCodeOwnerReview {
 			wantApprovals[rs.Name] = rs.RequiredApprovals
 			wantDismiss[rs.Name] = rs.DismissStaleReviewsOnPush
+			wantCodeOwner[rs.Name] = rs.RequireCodeOwnerReview
 		}
 	}
 
@@ -256,21 +262,7 @@ func checkRulesetActors(
 			compareBypassSets("repo "+name+" ruleset "+rs.Name, "bypass actors", want, got)...)
 
 		if n, stated := wantApprovals[rs.Name]; stated {
-			live := 0
-			liveDismiss := false
-
-			for _, rule := range detail.Rules {
-				if rule.Type != "pull_request" {
-					continue
-				}
-
-				if rule.Parameters.RequiredApprovingReviewCount != nil {
-					live = *rule.Parameters.RequiredApprovingReviewCount
-				}
-
-				liveDismiss = rule.Parameters.DismissStaleReviewsOnPush != nil &&
-					*rule.Parameters.DismissStaleReviewsOnPush
-			}
+			live, liveDismiss, liveCodeOwner := detail.pullRequestRule()
 
 			// Compared in BOTH directions: a hand-enabled dismissal the
 			// registry does not declare is exactly what a deploy would
@@ -281,6 +273,18 @@ func checkRulesetActors(
 					Field:   "dismiss stale reviews on push",
 					Want:    strconv.FormatBool(wantDismiss[rs.Name]),
 					Got:     strconv.FormatBool(liveDismiss),
+				})
+			}
+
+			// Both directions too: a code-owner requirement switched off
+			// by hand leaves the approval count and the actors as they
+			// were, and is otherwise invisible.
+			if liveCodeOwner != wantCodeOwner[rs.Name] {
+				drifts = append(drifts, Drift{
+					Subject: "repo " + name + " ruleset " + rs.Name,
+					Field:   "require code owner review",
+					Want:    strconv.FormatBool(wantCodeOwner[rs.Name]),
+					Got:     strconv.FormatBool(liveCodeOwner),
 				})
 			}
 
@@ -462,4 +466,26 @@ func compareBypassSets(subject, field string, want, got []string) []Drift {
 	}
 
 	return drifts
+}
+
+// pullRequestRule reads the live pull_request rule: its approval count,
+// whether it dismisses stale approvals on push, and whether it requires a
+// code owner's review. A ruleset without the rule reads as zero and false.
+func (d liveRulesetDetail) pullRequestRule() (approvals int, dismiss, codeOwner bool) {
+	for _, rule := range d.Rules {
+		if rule.Type != "pull_request" {
+			continue
+		}
+
+		if rule.Parameters.RequiredApprovingReviewCount != nil {
+			approvals = *rule.Parameters.RequiredApprovingReviewCount
+		}
+
+		dismiss = rule.Parameters.DismissStaleReviewsOnPush != nil &&
+			*rule.Parameters.DismissStaleReviewsOnPush
+		codeOwner = rule.Parameters.RequireCodeOwnerReview != nil &&
+			*rule.Parameters.RequireCodeOwnerReview
+	}
+
+	return approvals, dismiss, codeOwner
 }
