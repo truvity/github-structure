@@ -149,6 +149,12 @@ type (
 		// — an emptied one stays empty (docs/safety.md). nil means "no
 		// team is refillable", the safe default.
 		TeamFillable func(slug string) bool
+		// AllowRecreate names repositories whose delete-and-create is
+		// meant: a plan that deletes a repository's resources under one
+		// name and creates them under another is refused as a rename
+		// whose state was not re-keyed, unless the repository is named
+		// here (by either name). nil allows none.
+		AllowRecreate []string
 	}
 )
 
@@ -215,9 +221,9 @@ func Run(ctx context.Context, o Opts) error {
 	// "13 to replace" without naming what, which is not enough to decide
 	// whether a replacement is the legitimate kind.
 	eventCh := make(chan events.EngineEvent)
-	found := make(chan []plannedReplace, 1)
+	found := make(chan plan, 1)
 
-	go collectReplaces(eventCh, found)
+	go collectPlan(eventCh, found)
 
 	_, err = stack.Preview(ctx,
 		optpreview.ErrorProgressStreams(os.Stderr),
@@ -227,23 +233,26 @@ func Run(ctx context.Context, o Opts) error {
 		return fmt.Errorf("preview stack %s: %w", org, err)
 	}
 
-	replaces := <-found
+	planned := <-found
+	replaces := planned.replaces
+	renames := renameShaped(reg.Orgs[org], planned, o.AllowRecreate)
 
-	if len(problems) == 0 && len(replaces) == 0 {
+	if len(problems) == 0 && len(replaces) == 0 && len(renames) == 0 {
 		_, _ = fmt.Fprintf(os.Stdout,
 			"preflight OK — %s: every imported resource's ID matches state, "+
 				"no unfillable team left empty, no waiver outlived its cause, "+
-				"nothing irreplaceable planned for replacement\n", org)
+				"nothing irreplaceable planned for replacement, no repository deleted "+
+				"and created under another name\n", org)
 
 		return nil
 	}
 
-	return report(org, problems, replaces)
+	return report(org, problems, replaces, renames)
 }
 
 // report prints everything wrong at once. Fixing one problem only to be
 // told about the next is how a guard earns a habit of being bypassed.
-func report(org string, problems []string, replaces []plannedReplace) error {
+func report(org string, problems []string, replaces []plannedReplace, renames []renameFinding) error {
 	var b strings.Builder
 
 	if len(problems) > 0 {
@@ -258,16 +267,38 @@ func report(org string, problems []string, replaces []plannedReplace) error {
 		writeReplaces(&b, org, replaces)
 	}
 
+	if len(renames) > 0 {
+		writeRenames(&b, org, renames)
+	}
+
 	_, _ = fmt.Fprint(os.Stdout, b.String())
+
+	if len(renames) > 0 {
+		return fmt.Errorf("preflight failed: %d state problem(s), %d planned replacement(s), %d rename-shaped repository plan(s)",
+			len(problems), len(replaces), len(renames))
+	}
 
 	return fmt.Errorf("preflight failed: %d state problem(s), %d planned replacement(s)",
 		len(problems), len(replaces))
 }
 
-// collectReplaces drains the engine event stream, which must be consumed
-// to completion or Preview blocks.
+// collectReplaces is collectPlan for the replacement guard alone.
 func collectReplaces(eventCh <-chan events.EngineEvent, out chan<- []plannedReplace) {
+	planned := make(chan plan, 1)
+
+	collectPlan(eventCh, planned)
+
+	out <- (<-planned).replaces
+}
+
+// collectPlan drains the engine event stream, which must be consumed to
+// completion or Preview blocks, and keeps what the guards read: the
+// replacements of irreplaceable resources, and the creates and deletes of
+// repository-scoped resources.
+func collectPlan(eventCh <-chan events.EngineEvent, out chan<- plan) {
 	byURN := map[string]*plannedReplace{}
+
+	var planned plan
 
 	for e := range eventCh {
 		if e.ResourcePreEvent == nil {
@@ -275,6 +306,8 @@ func collectReplaces(eventCh <-chan events.EngineEvent, out chan<- []plannedRepl
 		}
 
 		meta := e.ResourcePreEvent.Metadata
+
+		collectStep(&planned, meta)
 
 		reason, guarded := irreplaceable[meta.Type]
 		guarded = guarded && replaceOps[string(meta.Op)]
@@ -312,7 +345,9 @@ func collectReplaces(eventCh <-chan events.EngineEvent, out chan<- []plannedRepl
 
 	sort.Slice(found, func(i, j int) bool { return found[i].urn < found[j].urn })
 
-	out <- found
+	planned.replaces = found
+
+	out <- planned
 }
 
 func writeReplaces(b *strings.Builder, org string, replaces []plannedReplace) {

@@ -145,7 +145,9 @@ func (r *runner) usage() string {
 	b.WriteString("  drift                compare the registry against live GitHub; non-zero on any drift\n")
 	b.WriteString("  entitlements apply   write every declared variable value/visibility, then PUT every declared scope\n")
 	b.WriteString("  preflight            preview the structure stack and refuse a plan that would replace\n")
-	b.WriteString("                       something whose state lives outside it\n")
+	b.WriteString("                       something whose state lives outside it, or that deletes a repository's\n")
+	b.WriteString("                       resources under one name and creates them under another;\n")
+	b.WriteString("                       --allow-recreate <repository> (repeatable) allows that for one\n")
 
 	for _, c := range r.cfg.Extra {
 		fmt.Fprintf(&b, "  %-20s %s\n", c.Name, c.Usage)
@@ -229,11 +231,12 @@ func (r *runner) dispatch(ctx context.Context, org string, rest []string) error 
 
 		return r.entitlementsApply(ctx, org)
 	case "preflight":
-		if len(rest) != 1 {
-			return usageError("preflight takes no arguments")
+		allow, err := preflightArgs(rest[1:])
+		if err != nil {
+			return err
 		}
 
-		return r.preflight(ctx, org)
+		return r.preflight(ctx, org, allow)
 	}
 
 	for _, c := range r.cfg.Extra {
@@ -379,7 +382,7 @@ func (r *runner) entitlementsApply(ctx context.Context, org string) error {
 
 // preflight selects the org's structure stack through Config.Stack and
 // hands the registry, the stack and the roster policy to pkg/preflight.
-func (r *runner) preflight(ctx context.Context, org string) error {
+func (r *runner) preflight(ctx context.Context, org string, allowRecreate []string) error {
 	if r.cfg.Stack == nil {
 		return errors.New("preflight is not configured: Config.Stack is nil")
 	}
@@ -399,7 +402,44 @@ func (r *runner) preflight(ctx context.Context, org string) error {
 		Registry:     reg,
 		Stack:        stack,
 		TeamFillable: r.cfg.TeamFillable,
+
+		AllowRecreate: allowRecreate,
 	})
+}
+
+// names is a repeatable string flag.
+type names []string
+
+func (n *names) String() string { return strings.Join(*n, ",") }
+
+func (n *names) Set(v string) error {
+	if v == "" {
+		return errors.New("empty repository name")
+	}
+
+	*n = append(*n, v)
+
+	return nil
+}
+
+// preflightArgs parses `preflight [--allow-recreate NAME]...`.
+func preflightArgs(args []string) ([]string, error) {
+	fset := flag.NewFlagSet("preflight", flag.ContinueOnError)
+	fset.SetOutput(io.Discard)
+
+	var allow names
+
+	fset.Var(&allow, "allow-recreate", "repository whose delete-and-create is meant (repeatable)")
+
+	if err := fset.Parse(args); err != nil {
+		return nil, usageError("usage: preflight [--allow-recreate <repository>]...: " + err.Error())
+	}
+
+	if fset.NArg() != 0 {
+		return nil, usageError("usage: preflight [--allow-recreate <repository>]...")
+	}
+
+	return allow, nil
 }
 
 // orgVariables is nil-safe: an org may declare no Actions block at all.
