@@ -1,6 +1,8 @@
 // Command github-structure runs the operations that are not Pulumi
-// resources. Today: reconciling code security configuration
-// attachments (`security-configurations plan|apply`).
+// resources: reconciling code security configuration attachments
+// (`security-configurations plan|apply`), and a company's check of its
+// fragment against the boundary the provider exported
+// (`validate-fragment`).
 package main
 
 import (
@@ -13,11 +15,18 @@ import (
 	"os/signal"
 	"path/filepath"
 
+	"github.com/truvity/github-structure/pkg/cli"
 	"github.com/truvity/github-structure/pkg/registry"
 	"github.com/truvity/github-structure/pkg/seccfg"
 )
 
-const usage = `usage: github-structure security-configurations <plan|apply> --org <org> (--desired <file> | --registry <github.yaml>) [flags]
+const usage = `usage: github-structure validate-fragment --owner <label> --boundary <file> <fragment.yaml>
+
+  validate-fragment   hold a company's fragment file to a boundary file the
+                      provider exported, and name every violation with its
+                      key path; needs no registry, no token, no network
+
+       github-structure security-configurations <plan|apply> --org <org> (--desired <file> | --registry <github.yaml>) [flags]
 
   plan    read GitHub, print the attachments needed; writes nothing
   apply   perform them; refuses without --confirm
@@ -41,6 +50,10 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, baseURL string) int {
+	if len(args) > 0 && args[0] == "validate-fragment" {
+		return cli.Run(ctx, cli.Config{Name: "github-structure", Stdout: stdout, Stderr: stderr}, args)
+	}
+
 	if len(args) < 2 || args[0] != "security-configurations" || (args[1] != "plan" && args[1] != "apply") {
 		_, _ = fmt.Fprintln(stderr, usage)
 

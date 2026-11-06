@@ -6,6 +6,8 @@
 //	<tool> [--org <org>] entitlements apply   # write declared variables and scopes
 //	<tool> [--org <org>] preflight            # what a structure apply would touch
 //	<tool> [--org <org>] state rename-repo <old> <new> [--apply]   # re-key the state of a renamed repository
+//	<tool> [--org <org>] boundary             # the org's fragment ceiling, as JSON
+//	<tool> validate-fragment --owner <label> [--boundary <file>] <fragment.yaml>   # a company's check
 //	<tool> [--org <org>] <extra>              # commands the estate adds (Config.Extra)
 //
 // The package knows nothing about any estate. Everything particular is a
@@ -166,6 +168,11 @@ func (r *runner) usage() string {
 	b.WriteString("                       something whose state lives outside it, or that deletes a repository's\n")
 	b.WriteString("                       resources under one name and creates them under another;\n")
 	b.WriteString("                       --allow-recreate <repository> (repeatable) allows that for one\n")
+
+	b.WriteString("  boundary             print the org's fragment ceiling and reserved names as JSON, for a\n")
+	b.WriteString("                       company to validate its fragment against\n")
+	b.WriteString("  validate-fragment    hold a company's fragment file to a boundary (--boundary <file>, else the\n")
+	b.WriteString("                       registry): --owner <label> <fragment.yaml>; names every violation\n")
 
 	for _, c := range r.cfg.Extra {
 		fmt.Fprintf(&b, "  %-20s %s\n", c.Name, c.Usage)
