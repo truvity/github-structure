@@ -244,6 +244,10 @@ func (r *runner) dispatch(ctx context.Context, org string, rest []string) error 
 		return r.drift(ctx, org)
 	case "state":
 		return r.state(ctx, org, rest[1:])
+	case "boundary":
+		return r.boundary(org, rest[1:])
+	case "validate-fragment":
+		return r.validateFragment(rest[1:])
 	case "entitlements":
 		if len(rest) != 2 || rest[1] != "apply" {
 			return usageError("usage: entitlements apply")
