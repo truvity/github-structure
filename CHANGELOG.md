@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Added
+
+- **`pkg/staterename`: the state re-key for a renamed repository, as a library function.** `staterename.Rekey(state, org, cfg, from, to)` takes the output of `pulumi stack export` (or its `deployment` object) and returns the state with the row's resources under the new name: URNs, every reference to them (dependencies, property dependencies, parent, deletedWith, aliases, provider), ids, import ids, and the name as a whole token in inputs and outputs. Free text (a description, a topic, a homepage, a ref pattern) is left alone. The row's resources are derived from the registry row with the engine's naming, so it refuses a state with a resource missing, a resource the row does not declare, or the target name already present, and it names every problem at once. Running it twice changes nothing, and swapping the names is the rollback. `staterename.ResourceNames` exposes the derivation. Until now the re-key existed only inside a test file that needs the `pulumi` CLI and skips in CI; the proof in `pkg/engine/rename_plan_test.go` now runs the shipped function, and a CI-run test compares the names it derives with the ones the engine declares. Nothing else changes: no existing registry, state or plan is affected.
+
 ## v0.22.1 — 2026-11-06
 
 ### Changed

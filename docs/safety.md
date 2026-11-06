@@ -114,13 +114,20 @@ The route that plans nothing is, in this order:
 1. Rename the repository on GitHub (`gh repo rename`). The repository id,
    node id, history and rulesets stay.
 2. Rename the row in the registry.
-3. Re-key the state. Move every URN that carries the old name to the new
+3. Re-key the state with `staterename.Rekey`, the one implementation of
+   this step (`pkg/staterename`). It is a pure transform of the output of
+   `pulumi stack export`: a consumer wires it to its own export and
+   import. What it does: move every URN that carries the old name to the new
    name, including every reference to those URNs in other resources'
    `dependencies`, `propertyDependencies`, `parent` and `deletedWith`.
    Then move the name as a whole token (`<org>/<old>`, `<team-id>:<old>`,
    `.../<old>.git`) in the same resources' ids, import ids, inputs and
    outputs, and leave free text such as the description alone. Keep the
    resources in dependency order: each after everything it refers to.
+   It derives the row's resources from the registry and refuses a state
+   that does not match: a missing resource, one the row does not declare,
+   or the target name already present. Running it twice changes nothing,
+   and swapping the two names is the rollback.
 4. `pulumi preview --refresh` must plan no create, delete, replace or
    update. Only then deploy.
 
@@ -162,7 +169,12 @@ GitHub that accepts no write. Its seeded state carries the dependency edges the
 engine records, and the test checks that an update writes back the same
 edges. It needs the `pulumi` CLI on `PATH` and skips without it. CI has
 no `pulumi` CLI, so CI does not enforce these statements. Run the test by
-hand when the engine, the provider or the test changes.
+hand when the engine, the provider or the test changes. Its re-key is the
+shipped `staterename.Rekey`, so the proof is about the function operators
+run. What CI does enforce is the pure tier: `pkg/staterename` re-keys a
+golden state, round-trips it, and refuses each unsafe state, and a test in
+`pkg/engine` declares a row under mocks and compares the resource names
+with the ones the re-key derives.
 
 ## The create path is the untested path
 
