@@ -161,6 +161,11 @@ type (
 		// Company links this org to a cfg/companies.yaml row. Truvity is
 		// the incumbent and has no code there; other orgs must name one.
 		Company string `yaml:"company,omitempty"`
+		// FragmentCeiling lets a company bring rows of its own into this
+		// org (see Compose) and says how far they may go. Absent, the org
+		// accepts no fragment, which is every org today. Read by Compose
+		// and Config.Boundary; the engine never sees it.
+		FragmentCeiling *FragmentCeiling `yaml:"fragment_ceiling,omitempty"`
 		// EngineCredentials says WHERE the credentials of the App this
 		// engine acts as, for this org, are kept — the caller reads
 		// them from there and hands engine.Credentials to Deploy. It is
@@ -363,6 +368,8 @@ type (
 
 	// OrgVariable is one org-level Actions variable.
 	OrgVariable struct {
+		// Owner is who wrote the row (see Team.Owner).
+		Owner string `yaml:"-"`
 		Value string `yaml:"value"`
 		// Visibility is private | selected | all, defaulting to PRIVATE —
 		// the safe end. A variable naming internal infrastructure that
@@ -380,6 +387,10 @@ type (
 
 	// Team is one org team. Nesting is expressed by Parent (a team slug).
 	Team struct {
+		// Owner is who wrote the row: empty for the provider's own file,
+		// a fragment's owner label otherwise. Set by Compose; it is not
+		// a YAML key.
+		Owner         string `yaml:"-"`
 		Name          string `yaml:"name,omitempty"`
 		Description   string `yaml:"description,omitempty"`
 		Privacy       string `yaml:"privacy,omitempty"`
@@ -399,6 +410,8 @@ type (
 	// Repo is one repository row: a profile reference plus the deviations
 	// that survived the keep-or-fix review.
 	Repo struct {
+		// Owner is who wrote the row (see Team.Owner).
+		Owner string `yaml:"-"`
 		// Preset names a key in Config.Presets.
 		Preset string `yaml:"preset"`
 		// Access names keys in Config.Access. Effective grants are the
@@ -893,6 +906,20 @@ const (
 
 // Load reads github.yaml from the given filesystem and validates it.
 func Load(fsys fs.FS) (*Config, error) {
+	c, err := parseConfig(fsys)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := c.finish(); err != nil {
+		return nil, err
+	}
+
+	return c, nil
+}
+
+// parseConfig decodes github.yaml strictly and nothing more.
+func parseConfig(fsys fs.FS) (*Config, error) {
 	var c Config
 	if err := load(fsys, "github.yaml", &c); err != nil {
 		// The loader is strict, so a retired key fails here as an
@@ -912,22 +939,30 @@ func Load(fsys fs.FS) (*Config, error) {
 		return nil, err
 	}
 
+	return &c, nil
+}
+
+// finish applies the defaults the file leaves implicit and validates the
+// whole. Load runs it on the provider's file; Compose runs it on the file
+// with the fragments' rows laid in, so a row is held to the same rules
+// whoever wrote it.
+func (c *Config) finish() error {
 	c.applyDefaultAccess()
 	c.applyTeamDefaults()
 
 	if err := c.applyWaivers(); err != nil {
-		return nil, fmt.Errorf("github.yaml: %w", err)
+		return fmt.Errorf("github.yaml: %w", err)
 	}
 
 	if err := c.resolveTagRulesetRefs(); err != nil {
-		return nil, fmt.Errorf("github.yaml: %w", err)
+		return fmt.Errorf("github.yaml: %w", err)
 	}
 
 	if err := c.Validate(); err != nil {
-		return nil, fmt.Errorf("github.yaml: %w", err)
+		return fmt.Errorf("github.yaml: %w", err)
 	}
 
-	return &c, nil
+	return nil
 }
 
 // applyTeamDefaults fills each team's empty privacy and notification
@@ -1333,6 +1368,10 @@ func (c *Config) validateOrg(login string, org *Org) error {
 
 	if org.Settings == nil {
 		return fmt.Errorf("org %q: settings are required", login)
+	}
+
+	if err := c.validateCeiling(login, org); err != nil {
+		return err
 	}
 
 	// Checked here and not only where it is inherited: a default every
