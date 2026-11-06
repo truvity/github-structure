@@ -1,0 +1,420 @@
+{
+  "version": 3,
+  "deployment": {
+    "manifest": {
+      "time": "2026-11-06T09:00:00Z",
+      "magic": "fixture",
+      "version": "v3.0.0"
+    },
+    "secrets_providers": {
+      "type": "passphrase",
+      "state": {
+        "salt": "v1:fixture:v1:fixture:fixture"
+      }
+    },
+    "resources": [
+      {
+        "urn": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "custom": false,
+        "type": "pulumi:pulumi:Stack"
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme",
+        "custom": true,
+        "id": "4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "type": "pulumi:providers:github",
+        "inputs": {
+          "owner": "acme"
+        },
+        "outputs": {
+          "owner": "acme"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme"
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management",
+        "custom": true,
+        "id": "101",
+        "type": "github:index/team:Team",
+        "inputs": {
+          "name": "management"
+        },
+        "outputs": {
+          "name": "management",
+          "slug": "management"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "importID": "management"
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/team:Team::team-engineers",
+        "custom": true,
+        "id": "102",
+        "type": "github:index/team:Team",
+        "inputs": {
+          "name": "engineers",
+          "parentTeamId": "101"
+        },
+        "outputs": {
+          "name": "engineers",
+          "slug": "engineers"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "importID": "engineers",
+        "dependencies": [
+          "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management"
+        ],
+        "propertyDependencies": {
+          "parentTeamId": [
+            "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management"
+          ]
+        }
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget",
+        "custom": true,
+        "id": "widget",
+        "type": "github:index/repository:Repository",
+        "inputs": {
+          "name": "widget",
+          "description": "widget",
+          "topics": [
+            "widget",
+            "acme-tool"
+          ],
+          "homepageUrl": "https://example.com/widget",
+          "visibility": "public"
+        },
+        "outputs": {
+          "name": "widget",
+          "description": "widget",
+          "topics": [
+            "widget",
+            "acme-tool"
+          ],
+          "homepageUrl": "https://example.com/widget",
+          "fullName": "acme/widget",
+          "htmlUrl": "https://github.com/acme/widget",
+          "sshCloneUrl": "git@github.com:acme/widget.git",
+          "gitCloneUrl": "git://github.com/acme/widget.git",
+          "nodeId": "R_kgDOfixture",
+          "repoId": 4242,
+          "visibility": "public"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "importID": "widget",
+        "protect": true
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/actionsRepositoryPermissions:ActionsRepositoryPermissions::actions-widget",
+        "custom": true,
+        "id": "widget",
+        "type": "github:index/actionsRepositoryPermissions:ActionsRepositoryPermissions",
+        "inputs": {
+          "repository": "widget",
+          "enabled": true
+        },
+        "outputs": {
+          "repository": "widget",
+          "enabled": true
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "importID": "widget",
+        "dependencies": [
+          "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget"
+        ],
+        "propertyDependencies": {
+          "repository": [
+            "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget"
+          ]
+        },
+        "retainOnDelete": true
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/workflowRepositoryPermissions:WorkflowRepositoryPermissions::workflow-perms-widget",
+        "custom": true,
+        "id": "widget",
+        "type": "github:index/workflowRepositoryPermissions:WorkflowRepositoryPermissions",
+        "inputs": {
+          "repository": "widget",
+          "defaultWorkflowPermissions": "write"
+        },
+        "outputs": {
+          "repository": "widget",
+          "defaultWorkflowPermissions": "write"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "importID": "widget",
+        "dependencies": [
+          "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget"
+        ],
+        "propertyDependencies": {
+          "repository": [
+            "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget"
+          ]
+        },
+        "deletedWith": "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget",
+        "retainOnDelete": true
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/branchProtection:BranchProtection::protection-widget",
+        "custom": true,
+        "id": "BPR_fixture",
+        "type": "github:index/branchProtection:BranchProtection",
+        "inputs": {
+          "repositoryId": "R_kgDOfixture",
+          "pattern": "master"
+        },
+        "outputs": {
+          "repositoryId": "R_kgDOfixture",
+          "pattern": "master"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "dependencies": [
+          "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget"
+        ],
+        "propertyDependencies": {
+          "repositoryId": [
+            "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget"
+          ]
+        }
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/repositoryRuleset:RepositoryRuleset::ruleset-widget-master-check",
+        "custom": true,
+        "id": "9001",
+        "type": "github:index/repositoryRuleset:RepositoryRuleset",
+        "inputs": {
+          "name": "master-check",
+          "repository": "widget",
+          "conditions": {
+            "refName": {
+              "includes": [
+                "~DEFAULT_BRANCH"
+              ],
+              "excludes": []
+            }
+          }
+        },
+        "outputs": {
+          "name": "master-check",
+          "repository": "widget",
+          "rulesetId": 9001,
+          "conditions": {
+            "refName": {
+              "includes": [
+                "~DEFAULT_BRANCH"
+              ],
+              "excludes": []
+            }
+          }
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "dependencies": [
+          "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget",
+          "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management"
+        ],
+        "propertyDependencies": {
+          "repository": [
+            "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget"
+          ],
+          "bypassActors": [
+            "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management"
+          ]
+        }
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/repositoryRuleset:RepositoryRuleset::ruleset-widget-release-tags",
+        "custom": true,
+        "id": "9002",
+        "type": "github:index/repositoryRuleset:RepositoryRuleset",
+        "inputs": {
+          "name": "release-tags",
+          "repository": "widget",
+          "conditions": {
+            "refName": {
+              "includes": [
+                "refs/tags/v*",
+                "refs/tags/widget"
+              ],
+              "excludes": []
+            }
+          }
+        },
+        "outputs": {
+          "name": "release-tags",
+          "repository": "widget",
+          "rulesetId": 9002,
+          "conditions": {
+            "refName": {
+              "includes": [
+                "refs/tags/v*",
+                "refs/tags/widget"
+              ],
+              "excludes": []
+            }
+          }
+        },
+        "parent": "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "dependencies": [
+          "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget",
+          "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management"
+        ],
+        "propertyDependencies": {
+          "repository": [
+            "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget"
+          ]
+        }
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/teamRepository:TeamRepository::grant-engineers-widget",
+        "custom": true,
+        "id": "102:widget",
+        "type": "github:index/teamRepository:TeamRepository",
+        "inputs": {
+          "teamId": "102",
+          "repository": "widget",
+          "permission": "push"
+        },
+        "outputs": {
+          "teamId": "102",
+          "repository": "widget",
+          "permission": "push"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "importID": "102:widget",
+        "dependencies": [
+          "urn:pulumi:acme::rename-proof::github:index/team:Team::team-engineers"
+        ],
+        "propertyDependencies": {
+          "teamId": [
+            "urn:pulumi:acme::rename-proof::github:index/team:Team::team-engineers"
+          ]
+        }
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/teamRepository:TeamRepository::grant-management-widget",
+        "custom": true,
+        "id": "101:widget",
+        "type": "github:index/teamRepository:TeamRepository",
+        "inputs": {
+          "teamId": "101",
+          "repository": "widget",
+          "permission": "pull"
+        },
+        "outputs": {
+          "teamId": "101",
+          "repository": "widget",
+          "permission": "pull"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "importID": "101:widget",
+        "dependencies": [
+          "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management"
+        ],
+        "propertyDependencies": {
+          "teamId": [
+            "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management"
+          ]
+        }
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-widget-two",
+        "custom": true,
+        "id": "widget-two",
+        "type": "github:index/repository:Repository",
+        "inputs": {
+          "name": "widget-two"
+        },
+        "outputs": {
+          "name": "widget-two",
+          "fullName": "acme/widget-two"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "importID": "widget-two"
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/teamRepository:TeamRepository::grant-management-widget-two",
+        "custom": true,
+        "id": "101:widget-two",
+        "type": "github:index/teamRepository:TeamRepository",
+        "inputs": {
+          "teamId": "101",
+          "repository": "widget-two",
+          "permission": "pull"
+        },
+        "outputs": {
+          "teamId": "101",
+          "repository": "widget-two",
+          "permission": "pull"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "importID": "101:widget-two",
+        "dependencies": [
+          "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management"
+        ],
+        "propertyDependencies": {
+          "teamId": [
+            "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management"
+          ]
+        }
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-big-widget",
+        "custom": true,
+        "id": "big-widget",
+        "type": "github:index/repository:Repository",
+        "inputs": {
+          "name": "big-widget"
+        },
+        "outputs": {
+          "name": "big-widget",
+          "fullName": "acme/big-widget"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "importID": "big-widget"
+      },
+      {
+        "urn": "urn:pulumi:acme::rename-proof::github:index/teamRepository:TeamRepository::grant-management-big-widget",
+        "custom": true,
+        "id": "101:big-widget",
+        "type": "github:index/teamRepository:TeamRepository",
+        "inputs": {
+          "teamId": "101",
+          "repository": "big-widget",
+          "permission": "pull"
+        },
+        "outputs": {
+          "teamId": "101",
+          "repository": "big-widget",
+          "permission": "pull"
+        },
+        "parent": "urn:pulumi:acme::rename-proof::pulumi:pulumi:Stack::rename-proof-acme",
+        "provider": "urn:pulumi:acme::rename-proof::pulumi:providers:github::github-acme::4f7c0b2e-1a52-4d1e-9a3b-6c1d2e3f4a5b",
+        "importID": "101:big-widget",
+        "dependencies": [
+          "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management",
+          "urn:pulumi:acme::rename-proof::github:index/repository:Repository::repo-big-widget"
+        ],
+        "propertyDependencies": {
+          "teamId": [
+            "urn:pulumi:acme::rename-proof::github:index/team:Team::team-management"
+          ]
+        }
+      }
+    ]
+  }
+}
