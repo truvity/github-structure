@@ -5,6 +5,7 @@
 //	<tool> [--org <org>] drift                # registry vs live GitHub
 //	<tool> [--org <org>] entitlements apply   # write declared variables and scopes
 //	<tool> [--org <org>] preflight            # what a structure apply would touch
+//	<tool> [--org <org>] state rename-repo <old> <new> [--apply]   # re-key the state of a renamed repository
 //	<tool> [--org <org>] <extra>              # commands the estate adds (Config.Extra)
 //
 // The package knows nothing about any estate. Everything particular is a
@@ -23,8 +24,10 @@ import (
 	"io"
 	"io/fs"
 	"strings"
+	"time"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/auto"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/apitype"
 
 	"github.com/truvity/github-structure/pkg/app"
 	"github.com/truvity/github-structure/pkg/preflight"
@@ -85,6 +88,11 @@ type (
 		reconcileVar func(ctx context.Context, org string, cfg *registry.Config) ([]string, error)
 		reconcileScp func(ctx context.Context, org string, cfg *registry.Config) ([]string, error)
 		preflight    func(ctx context.Context, o preflight.Opts) error
+		// exportState and importState are the stack's state, as
+		// `pulumi stack export` and `import` read and write it.
+		exportState func(ctx context.Context, stack auto.Stack) (apitype.UntypedDeployment, error)
+		importState func(ctx context.Context, stack auto.Stack, state apitype.UntypedDeployment) error
+		now         func() time.Time
 	}
 
 	runner struct {
@@ -104,6 +112,13 @@ func liveChecks() checks {
 		reconcileVar: app.ReconcileOrgVariables,
 		reconcileScp: app.ReconcileEntitlementScopes,
 		preflight:    preflight.Run,
+		exportState: func(ctx context.Context, stack auto.Stack) (apitype.UntypedDeployment, error) {
+			return stack.Export(ctx)
+		},
+		importState: func(ctx context.Context, stack auto.Stack, state apitype.UntypedDeployment) error {
+			return stack.Import(ctx, state)
+		},
+		now: time.Now,
 	}
 }
 
@@ -144,6 +159,9 @@ func (r *runner) usage() string {
 	b.WriteString("commands:\n")
 	b.WriteString("  drift                compare the registry against live GitHub; non-zero on any drift\n")
 	b.WriteString("  entitlements apply   write every declared variable value/visibility, then PUT every declared scope\n")
+	b.WriteString("  state rename-repo    re-key the stack's state after a repository was renamed: <old> <new>;\n")
+	b.WriteString("                       a dry run unless --apply, which saves a backup first (--backup-dir,\n")
+	b.WriteString("                       default the user cache directory, not the working directory)\n")
 	b.WriteString("  preflight            preview the structure stack and refuse a plan that would replace\n")
 	b.WriteString("                       something whose state lives outside it, or that deletes a repository's\n")
 	b.WriteString("                       resources under one name and creates them under another;\n")
@@ -224,6 +242,8 @@ func (r *runner) dispatch(ctx context.Context, org string, rest []string) error 
 		}
 
 		return r.drift(ctx, org)
+	case "state":
+		return r.state(ctx, org, rest[1:])
 	case "entitlements":
 		if len(rest) != 2 || rest[1] != "apply" {
 			return usageError("usage: entitlements apply")
