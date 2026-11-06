@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Changed
+
+- `github.com/klauspost/compress` v1.20.3, which fixes GO-2026-6865 (a panic decoding two-block frames).
+
 ## v0.22.0 — 2026-11-05
 
 ### Added
