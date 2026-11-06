@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/truvity/github-structure/pkg/registry"
+	"github.com/truvity/github-structure/pkg/staterename"
 )
 
 // The question this file answers, with the real Pulumi engine and the real
@@ -814,11 +815,25 @@ type stale struct {
 // parent, deletedWith, provider) moves with it. The name moves as a whole
 // token in the moved resources' ids, import ids, inputs and outputs.
 // Nothing else is touched. It returns what `pulumi stack import` answers.
-func (h *harness) rekey(from, to string, leave stale) error {
+//
+// The whole re-key is the shipped one, staterename.Rekey: what this proof
+// establishes is a property of the function operators run. The partial
+// re-keys (stale) are the ablations that prove each part is needed, and are
+// local to this file on purpose.
+func (h *harness) rekey(reg *registry.Config, from, to string, leave stale) error {
 	h.t.Helper()
 
 	exported, err := h.stack.Export(h.t.Context())
 	require.NoError(h.t, err)
+
+	if leave == (stale{}) {
+		out, rep, err := staterename.Rekey(exported.Deployment, renameOrg, reg, from, to)
+		require.NoError(h.t, err)
+		require.False(h.t, rep.Noop)
+		require.Positive(h.t, rep.References, "the state carries references to the moved resources")
+
+		return h.stack.Import(h.t.Context(), apitype.UntypedDeployment{Version: exported.Version, Deployment: out})
+	}
 
 	var d apitype.DeploymentV3
 	require.NoError(h.t, json.Unmarshal(exported.Deployment, &d))
@@ -1077,7 +1092,7 @@ func TestRenamePlanRenamedRowIsDeleteAndCreate(t *testing.T) {
 // meet.
 func TestRenamePlanRekeyedStatePlansNothing(t *testing.T) {
 	h, reg, orgCfg, grants := renameCase(t)
-	require.NoError(t, h.rekey(oldRepo, newRepo, stale{}))
+	require.NoError(t, h.rekey(reg, oldRepo, newRepo, stale{}))
 
 	steps, _, err := h.preview(h.program(reg, orgCfg, liveWith(newRepo, grants), nil))
 	logPlan(t, "row renamed, state re-keyed, GitHub renamed", steps, err)
@@ -1098,9 +1113,9 @@ func TestRenamePlanRekeyNeedsEveryPart(t *testing.T) {
 		// Other resources still name the old URNs in their dependencies:
 		// the CLI refuses the state, and its suggested --force would
 		// import dangling edges.
-		h, _, _, _ := renameCase(t)
+		h, reg, _, _ := renameCase(t)
 
-		err := h.rekey(oldRepo, newRepo, stale{references: true})
+		err := h.rekey(reg, oldRepo, newRepo, stale{references: true})
 		require.Error(t, err)
 		t.Logf("stack import: %v", err)
 		assert.Contains(t, err.Error(), "refers to missing resource")
@@ -1109,7 +1124,7 @@ func TestRenamePlanRekeyNeedsEveryPart(t *testing.T) {
 
 	t.Run("import ids", func(t *testing.T) {
 		h, reg, orgCfg, grants := renameCase(t)
-		require.NoError(t, h.rekey(oldRepo, newRepo, stale{importIDs: true}))
+		require.NoError(t, h.rekey(reg, oldRepo, newRepo, stale{importIDs: true}))
 
 		steps, _, err := h.preview(h.program(reg, orgCfg, liveWith(newRepo, grants), nil))
 		logPlan(t, "re-keyed, import ids left stale", steps, err)
@@ -1125,7 +1140,7 @@ func TestRenamePlanRekeyNeedsEveryPart(t *testing.T) {
 
 	t.Run("outputs", func(t *testing.T) {
 		h, reg, orgCfg, grants := renameCase(t)
-		require.NoError(t, h.rekey(oldRepo, newRepo, stale{outputs: true}))
+		require.NoError(t, h.rekey(reg, oldRepo, newRepo, stale{outputs: true}))
 
 		steps, _, err := h.preview(h.program(reg, orgCfg, liveWith(newRepo, grants), nil))
 		logPlan(t, "re-keyed, outputs left stale", steps, err)

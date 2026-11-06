@@ -184,7 +184,7 @@ func TestRekeyGolden(t *testing.T) {
 	assert.Equal(t, newName, rep.To)
 	assert.Len(t, rep.Moved, 8, "repo, two Actions settings, protection, two rulesets, two grants")
 	assert.Positive(t, rep.References, "other resources referred to the moved ones")
-	assert.Equal(t, 15, rep.Resources)
+	assert.Equal(t, 16, rep.Resources)
 
 	for _, m := range rep.Moved {
 		assert.Contains(t, m.From, oldName)
@@ -303,7 +303,11 @@ func TestRekeyRefuses(t *testing.T) {
 		{"target partly in the state", cloneResource(t, good, "grant-management-"+oldName, "grant-management-"+newName), cfg, org, oldName, newName, "already holds"},
 		{"protection missing", dropResource(t, good, "protection-"+oldName), cfg, org, oldName, newName, "missing"},
 		{"a grant missing", dropResource(t, good, "grant-engineers-"+oldName), cfg, org, oldName, newName, "missing"},
-		{"a ruleset the row does not declare", cloneResource(t, good, "ruleset-"+oldName+"-master-check", "ruleset-"+oldName+"-stray"), cfg, org, oldName, newName, "unexpected"},
+		{
+			"a ruleset the row does not declare",
+			cloneResource(t, good, "ruleset-"+oldName+"-master-check", "ruleset-"+oldName+"-stray"),
+			cfg, org, oldName, newName, "unexpected",
+		},
 		{"the same resource twice", cloneResource(t, good, "repo-"+oldName, "repo-"+oldName), cfg, org, oldName, newName, "twice"},
 		{"nothing carries the old name", dropAll(t, good, oldName), cfg, org, oldName, newName, "no resource"},
 		{"from equals to", good, cfg, org, newName, newName, "same"},
