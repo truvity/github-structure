@@ -186,6 +186,17 @@ file instead of a registry. `plan` is read-only and exits non-zero only on
 errors; `apply` refuses without `--confirm`. The library functions are the
 same ones, for a pipeline that already holds an App client.
 
+A company that holds only the boundary file the provider exported (the
+`boundary` command prints it) checks its own fragment with no registry,
+token or network:
+
+```sh
+github-structure validate-fragment --owner globex --boundary boundary.json github-fragment.yaml
+```
+
+`boundary` prints an organization's fragment ceiling and reserved names as
+JSON, names only. See [docs/registry.md](docs/registry.md).
+
 ## The rule that makes this repository public
 
 **Mechanism only.** The registry FILE — your orgs, teams, repos, waiver

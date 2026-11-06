@@ -97,3 +97,41 @@ func TestUsageAndUnknownNamesExitNonZero(t *testing.T) {
 		&out, &errb, fakeGitHub(t, &posts)))
 	assert.Contains(t, errb.String(), "unknown security configuration")
 }
+
+const exportedBoundary = `{
+  "org": "acme",
+  "presets": {"private": "private"},
+  "access": ["devs"],
+  "bypass_apps": [],
+  "max_team_permission": "push",
+  "public_repos": false,
+  "reserved": {"repos": ["infra"]},
+  "provider_owns": []
+}`
+
+func TestValidateFragmentNeedsNoRegistryOrToken(t *testing.T) {
+	dir := t.TempDir()
+	boundary := filepath.Join(dir, "boundary.json")
+	good := filepath.Join(dir, "good.yaml")
+	bad := filepath.Join(dir, "bad.yaml")
+
+	require.NoError(t, os.WriteFile(boundary, []byte(exportedBoundary), 0o600))
+	require.NoError(t, os.WriteFile(good, []byte("org: acme\nrepos:\n  gadget:\n    preset: private\n"), 0o600))
+	require.NoError(t, os.WriteFile(bad, []byte("org: acme\nrepos:\n  infra:\n    preset: private\n"), 0o600))
+
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+
+	var out, errb bytes.Buffer
+
+	code := run(context.Background(), []string{"validate-fragment", "--boundary", boundary, "--owner", "globex", good}, &out, &errb, "")
+	assert.Equal(t, 0, code, errb.String())
+	assert.Contains(t, out.String(), "ok")
+
+	out.Reset()
+	errb.Reset()
+
+	code = run(context.Background(), []string{"validate-fragment", "--boundary", boundary, "--owner", "globex", bad}, &out, &errb, "")
+	assert.Equal(t, 1, code)
+	assert.Contains(t, errb.String(), "repos.infra: provider-owned (reserved)")
+}

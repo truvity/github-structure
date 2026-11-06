@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Added
+
+- **`boundary` and `validate-fragment`: the ceiling out, the check in a company's CI.** `cli.Run` gains `boundary`, which prints `--org`'s boundary (`Config.Boundary`) as JSON, and `validate-fragment --owner <label> [--boundary <file>] <fragment.yaml>`, which parses the fragment as the registry's strict YAML and runs `registry.ValidateFragment`: it prints `ok` and exits 0, or names every violation with its key path (`repos.gadget: provider-owned (reserved)`) and exits 1; a file that cannot be read or parsed is exit 1 and a missing `--owner` or file argument is exit 2. With `--boundary` the check needs no registry; without it, the configured registry supplies the fragment's org. The `github-structure` command gains `validate-fragment` for a company that has the boundary file and nothing else: no registry, no token, no network. Nothing else changes: an estate that wired `cli.Run` gets two new command names and no other difference.
+
 ## v0.24.0 — 2026-11-06
 
 ### Added
