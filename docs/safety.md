@@ -187,8 +187,12 @@ against the real Pulumi engine and the real provider. It runs
 GitHub that accepts no write. Its seeded state carries the dependency edges the
 engine records, and the test checks that an update writes back the same
 edges. It needs the `pulumi` CLI on `PATH` and skips without it. CI has
-no `pulumi` CLI, so CI does not enforce these statements. Run the test by
-hand when the engine, the provider or the test changes. Its re-key is the
+no `pulumi` CLI, so CI does not enforce these statements: the proof is
+local-only by decision, because a CI job would have to download the CLI and
+the provider plugin on every run. Run `just prove-rename` when the engine,
+the provider, `staterename.Rekey` or the test changes. The recipe fails if
+there is no CLI or if any test skipped, where a bare `go test` reports a
+pass for a skipped proof. Its re-key is the
 shipped `staterename.Rekey`, so the proof is about the function operators
 run. What CI does enforce is the pure tier: `pkg/staterename` re-keys a
 golden state, round-trips it, and refuses each unsafe state, and a test in
