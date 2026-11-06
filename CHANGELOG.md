@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Added
+
+- **`registry.Compose`: a company's rows inside an org the provider manages, under a ceiling the provider sets.** `Compose(provider, fragments...)` reads the provider's `github.yaml` like `Load` and lays one `Fragment` per org over it: teams, repositories, Actions variables, named tag rulesets, waivers, and the org singletons (`settings`, `default_access`, `team_defaults`) the provider has left unset. An org opts in with a `fragment_ceiling:` (the presets, access bundles and bypass Apps a fragment may name, a required `max_team_permission`, `public_repos`, and `reserved:` repository, team and variable names); an org without one accepts no fragment. A fragment may not carry `engine_credentials`, `owners`, `runner_groups`, `security_configurations`, `default_security_configuration` or `company`. A repository, team, variable or tag ruleset the provider declares or reserves, a value outside the ceiling, a public repository without `public_repos`, a team parent outside the fragment, a second fragment for an org, and a fragment for an unknown org or one with no ceiling are all refused, every violation at once with its key path (`org "acme": fragment owner "globex": repos.gadget: provider-owned (reserved); ...`), and a refusal returns no config. Names are compared without regard to case, as GitHub does, so `Infra` collides with the provider's `infra`, and two rows of one kind that differ only by case are refused. `Repo`, `Team` and org-variable rows gain a read-only `Owner` (empty for the provider's own rows); resolved output, resource names and URNs are unchanged. `Config.Boundary(org)` exports the ceiling and the reserved names as JSON (names only, no values), `registry.ValidateFragment(boundary, fragment)` is the check `Compose` runs so a company validates first in the same words, and `registry.ParseFragment` reads a fragment file in the registry's strict YAML. Default off: `Load` is unchanged, `Compose` without fragments returns what `Load` returns, and moving rows from the provider's file into a fragment resolves to the same output.
+
 ## v0.23.0 — 2026-11-06
 
 ### Added

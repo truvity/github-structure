@@ -470,3 +470,79 @@ membership requires credentials this tooling deliberately does not hold
 renovate App's own selected list was the third layer of the same dead
 zone. Until that grows an API story, App installs stay a checklist item
 in the estate's safety runbook.
+
+## Layering a company's rows over the provider's registry
+
+The provider's `github.yaml` stays the file `registry.Load` reads, and
+nothing below changes how it loads. When a company has to own rows inside
+an org the provider manages, each side keeps one writer per row:
+`registry.Compose(provider fs.FS, fragments ...Fragment)` lays one
+fragment per org over the provider's file, and the merged result goes
+through the same validation as a `Load`. Without fragments the result is
+exactly what `Load` returns.
+
+**The ceiling.** An org opts in with a `fragment_ceiling:` beside its other
+keys. An org without one accepts no fragment.
+
+```yaml
+orgs:
+  acme:
+    fragment_ceiling:
+      presets: [private]          # the profiles a fragment's rows may name
+      access: [devs]              # the access bundles they may name
+      bypass_apps: [release-bot]  # the Apps their rulesets may bypass
+      max_team_permission: push   # the strongest grant to a team (required)
+      public_repos: false         # whether a row may be public (default false)
+      reserved:                   # names kept even where nothing is declared yet
+        repos: [infra]
+        teams: [platform]
+        variables: [RUNNER_LABELS]
+```
+
+**What a fragment may carry.** `default_access`, `settings`,
+`team_defaults`, `tag_rulesets`, `checks_waived`, `teams`, `repos` and
+`variables` (merged into the org's `settings.actions.variables`). The org
+singletons (`settings`, `default_access`, `team_defaults`) only where the
+provider has not set them. It may not carry `engine_credentials`,
+`owners`, `runner_groups`, `security_configurations`,
+`default_security_configuration` or `company`; each is refused by name. A
+fragment file is the same strict YAML with an `org:` key
+(`registry.ParseFragment(owner, data)`).
+
+**What is refused.** A repository, team, variable or named tag ruleset
+the provider declares or reserves, compared without regard to case as
+GitHub does (`Infra` is the provider's `infra`), and two rows of one kind
+in the merged result that differ only by case; a preset, access bundle or bypass App
+outside the ceiling; a team permission above the maximum; a public
+repository where `public_repos` is false (through the preset or through an
+override); a team parent that is not a team of the fragment (a parent
+passes access down, and across owners that would lend it); a waiver for a
+repository the fragment does not own; a second fragment for the same org; a
+fragment for an org the registry lacks or one with no ceiling. Every
+violation is named with its key path, all at once:
+
+```text
+org "acme": fragment owner "globex": repos.gadget: provider-owned (reserved); repos.gadget.tag_rulesets[0].bypass_apps[0] "x" outside ceiling
+```
+
+A refusal returns no config, so a caller keeps its last good pin.
+
+**Outside the ceiling: bypass teams and org-admin bypass.** The ceiling
+bounds bypass Apps. A ruleset's `bypass_teams`, `bypass_org_admins` and
+`protection.pull_request_bypassers` are not held to the fragment's own
+teams (a `bypass_teams` entry only has to be a team of the merged org, as
+in `Load`). They widen who may merge on the fragment's own repositories,
+not on the provider's. A provider that wants
+them limited to the fragment's own teams adds that to the ceiling.
+
+**Who wrote a row.** `Repo`, `Team` and org-variable rows carry a
+read-only `Owner`: empty for the provider's own rows, the fragment's owner
+label for the rest. It changes nothing downstream: the resolved row, the
+resource names and the URNs are the ones the same rows give written inline.
+
+**Validating before the provider does.** `Config.Boundary(org)` exports
+the ceiling and the reserved names (the explicit ones together with every
+name the provider declares) as JSON. It carries names only: no credentials
+path, no owner, no variable value. A company decodes it and runs
+`registry.ValidateFragment(boundary, fragment)`, which is the check
+`Compose` runs, so the refusal is the same words in both places.
