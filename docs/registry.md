@@ -546,3 +546,29 @@ name the provider declares) as JSON. It carries names only: no credentials
 path, no owner, no variable value. A company decodes it and runs
 `registry.ValidateFragment(boundary, fragment)`, which is the check
 `Compose` runs, so the refusal is the same words in both places.
+
+**Doing it from a command line.** Neither side has to write Go for this.
+The provider's tool (`cli.Run`) gains `boundary`, which prints an org's
+boundary as JSON, to be published wherever the company's CI can read it:
+
+```sh
+githubctl --org acme boundary > boundary.json
+```
+
+A company's CI then holds its fragment file to that file with the
+`github-structure` command, which needs no registry, no token and no
+network:
+
+```sh
+github-structure validate-fragment --owner globex --boundary boundary.json github-fragment.yaml
+```
+
+It prints `org "acme": fragment owner "globex": ok` and exits 0, or names
+every violation with its key path and exits 1, in the words `Compose` uses.
+`--owner` is the label of whoever wrote the file (it is not a YAML key). The
+boundary file is read strictly: a file that is not the output of `boundary`
+is refused rather than half-read. Where the tool is configured with the
+registry itself, `validate-fragment` without `--boundary` uses the
+fragment's own org from it. The boundary is a snapshot: validate against the
+current one, since a later `Compose` holds the fragment to the registry as
+it is then.
