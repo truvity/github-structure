@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Changed
+
+- **`just prove-rename` runs the Pulumi-tier rename proof.** The proof in `pkg/engine/rename_plan_test.go` (a real `pulumi preview` against a fake GitHub, with the shipped `staterename.Rekey`) stays local-only: CI has no `pulumi` CLI. The recipe runs it and fails when the CLI is missing or any test skipped, instead of passing a skipped proof. `docs/safety.md` says so. No library, registry or command changes.
+
 ## v0.24.0 — 2026-11-06
 
 ### Added
