@@ -13,7 +13,9 @@ what nobody declared.
 | --- | --- |
 | `pkg/registry` | The registry schema: settings **profiles**, per-repo **overrides with reasons**, **waivers with exit conditions**; strict loading (unknown keys are errors) and validation |
 | `pkg/engine` | The Pulumi engine: org settings, owners, teams, repos, protection, rulesets, Actions permissions — import-first adoption of what already exists |
-| `pkg/preflight` | The guards that run BEFORE the engine: refuse replaces of irreplaceable resources, catch waivers that outlived their cause, refuse plans that empty teams |
+| `pkg/preflight` | The guards that run BEFORE the engine: refuse replaces of irreplaceable resources, catch waivers that outlived their cause, refuse plans that empty teams, refuse a renamed row whose state was not re-keyed |
+| `pkg/staterename` | `Rekey`: the one state re-key a repository rename needs, a pure transform of an exported Pulumi state that refuses what it cannot be sure of |
+| `pkg/cli` | The operator command line as a package an estate wires instead of copies: `drift`, `entitlements apply`, `preflight`, `state rename-repo` |
 | `pkg/seccfg` | The code security configuration **attachment reconciler** (`Plan` / `Apply`) and the `github-structure security-configurations` command. REST, not Pulumi; it attaches and never detaches |
 | `pkg/app` | The GitHub App side: App JWT, the REST client, drift checks (variables, owners, repo settings, bypass surfaces), and resolving a ruleset's bypass App slugs against the org's live installations. It authenticates AS an App; it never creates, inventories or audits one |
 
@@ -67,7 +69,7 @@ earned it.
 ## Install and a worked example
 
 ```sh
-go get github.com/truvity/github-structure@v0.12.2
+go get github.com/truvity/github-structure@v0.22.1
 ```
 
 ```go
@@ -90,12 +92,18 @@ Run `preflight` against the stack's `pulumi preview` before every apply
 never reaches Pulumi), and validate applies with `pulumi preview
 --refresh` afterwards.
 
+Renaming a repository is a state operation, not a registry edit: rename it
+on GitHub, rename its row, then re-key the stack's state with
+`<tool> --org <org> state rename-repo <old> <new>` (a dry run; `--apply`
+saves a backup and writes). See [docs/safety.md](docs/safety.md).
+
 ## Consumers
 
 Imported as a Go library by:
 
-- **truvity/gitops**: uses the registry, engine, preflight and app packages
-  to manage the production organization's structure
+- **An organization's configuration repository**: uses the registry, engine,
+  preflight, app and cli packages to manage the production organization's
+  structure
 - **A second, non-AWS estate**: uses the registry, engine and app packages
   to manage the per-team organization's structure (it does not import
   `preflight`)

@@ -116,8 +116,14 @@ The route that plans nothing is, in this order:
 2. Rename the row in the registry.
 3. Re-key the state with `staterename.Rekey`, the one implementation of
    this step (`pkg/staterename`). It is a pure transform of the output of
-   `pulumi stack export`: a consumer wires it to its own export and
-   import. What it does: move every URN that carries the old name to the new
+   `pulumi stack export`. The operator command is `state rename-repo <old>
+   <new>` in `pkg/cli` (a dry run that prints every move; `--apply` saves
+   the state it read to a private file in `--backup-dir` (default: the user
+   cache directory, under the tool's name, never the working directory, which
+   may be a checkout; a directory inside a git work tree is used with a
+   warning), then imports the
+   new one through the stack `Config.Stack` selects). A consumer with its
+   own pipeline can call `staterename.Rekey` directly. What it does: move every URN that carries the old name to the new
    name, including every reference to those URNs in other resources'
    `dependencies`, `propertyDependencies`, `parent` and `deletedWith`.
    Then move the name as a whole token (`<org>/<old>`, `<team-id>:<old>`,
