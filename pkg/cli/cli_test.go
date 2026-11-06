@@ -187,6 +187,49 @@ func TestPreflightPassesTheEstatePolicyThrough(t *testing.T) {
 	assert.False(t, got.TeamFillable("robots"))
 }
 
+func TestPreflightAllowRecreateIsRepeatableAndPerName(t *testing.T) {
+	var calls []string
+
+	chk := script(&calls)
+
+	var got preflight.Opts
+
+	chk.preflight = func(_ context.Context, o preflight.Opts) error {
+		got = o
+
+		return nil
+	}
+
+	r, _, errb := newRunner(t, chk)
+	r.cfg.Stack = func(context.Context, string) (auto.Stack, error) { return auto.Stack{}, nil }
+
+	assert.Equal(t, 0, r.run(context.Background(),
+		[]string{"preflight", "--allow-recreate", "gadget", "--allow-recreate=gizmo"}), errb.String())
+	assert.Equal(t, []string{"gadget", "gizmo"}, got.AllowRecreate)
+
+	assert.Equal(t, 0, r.run(context.Background(), []string{"preflight"}), errb.String())
+	assert.Empty(t, got.AllowRecreate, "nothing is allowed unless named")
+}
+
+func TestPreflightRefusesStrayArguments(t *testing.T) {
+	var calls []string
+
+	for _, args := range [][]string{
+		{"preflight", "gadget"},
+		{"preflight", "--allow-recreate"},
+		{"preflight", "--allow-recreate", ""},
+		{"preflight", "--all"},
+	} {
+		r, _, errb := newRunner(t, script(&calls))
+		r.cfg.Stack = func(context.Context, string) (auto.Stack, error) { return auto.Stack{}, nil }
+
+		assert.Equal(t, 2, r.run(context.Background(), args), "%v: %s", args, errb.String())
+		assert.Contains(t, errb.String(), "preflight", "%v", args)
+	}
+
+	assert.Empty(t, calls)
+}
+
 func TestPreflightWithoutAStackSelectorFailsLoudly(t *testing.T) {
 	var calls []string
 

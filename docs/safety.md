@@ -151,6 +151,19 @@ every read and write afterwards, because a stale id resolves through
 GitHub's redirect from the old name. That works only until a repository
 with the old name exists again.
 
+The preflight refuses the plan that skips step 3. When a created resource
+belongs to a declared row and a deleted resource of the same kind (the same
+type, ruleset name or team) belongs to a repository the registry no longer
+declares, the plan is rename-shaped, and the refusal says to re-key the
+state with `state rename-repo <old> <new>` instead. The check covers
+resources the other guards do not: a team grant is neither irreplaceable
+nor guarded, so a plan that deleted only grants passed, and a grant delete
+can strip a team's access when GitHub redirects the old name to the renamed
+repository. A repository removed in the same run that another is added
+looks the same by name, so the refusal can be overridden per repository:
+`preflight --allow-recreate <repository>`, repeatable, matching either name
+of the pair. The scope is repositories; a team rename is not covered.
+
 There is deliberately no `renamed_from` field that would alias the old
 names. With this provider, aliases alone are not a rename:
 
