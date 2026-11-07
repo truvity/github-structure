@@ -172,6 +172,18 @@ func requiredChecksOf(resolved registry.Resolved) []string {
 // skipped — the run that creates a repository is not the run that can
 // prove its CI.
 func checkUnreportedChecks(ctx context.Context, reg *registry.Config, org string) ([]string, error) {
+	return unreportedChecks(ctx, app.API, reg, org)
+}
+
+// getFunc is the one GitHub read the guards need: a GET of a REST path
+// decoded into dst. app.API is the production one; tests hand in a fake,
+// because a guard that cannot be run against a made-up repository
+// history cannot be tested for the timing cases that matter.
+type getFunc func(ctx context.Context, path string, dst any) error
+
+// unreportedChecks is checkUnreportedChecks with the GitHub read passed
+// in.
+func unreportedChecks(ctx context.Context, get getFunc, reg *registry.Config, org string) ([]string, error) {
 	orgCfg, ok := reg.Orgs[org]
 	if !ok {
 		return nil, nil
@@ -192,7 +204,7 @@ func checkUnreportedChecks(ctx context.Context, reg *registry.Config, org string
 			continue
 		}
 
-		reported, err := reportedChecks(ctx, org, name, resolved.DefaultBranch)
+		reported, err := reportedChecksVia(ctx, get, org, name, resolved.DefaultBranch)
 		if err != nil {
 			if noEvidence(err) {
 				continue
@@ -207,7 +219,7 @@ func checkUnreportedChecks(ctx context.Context, reg *registry.Config, org string
 		// master — four public repositories are in exactly that shape,
 		// and probing the branch alone called every one of them broken.
 		if len(reportedSuppressed(required, reported)) == 0 {
-			pullReported, err := reportedOnLatestPull(ctx, org, name)
+			pullReported, err := reportedOnLatestPull(ctx, get, org, name)
 			if err != nil {
 				return nil, err
 			}
@@ -232,7 +244,7 @@ func checkUnreportedChecks(ctx context.Context, reg *registry.Config, org string
 // PR-only CI contract is visible at all. A repository that has never
 // had a pull request, or whose head commit is gone, reports nothing,
 // which is the honest answer to "does this context exist?".
-func reportedOnLatestPull(ctx context.Context, org, repo string) ([]string, error) {
+func reportedOnLatestPull(ctx context.Context, get getFunc, org, repo string) ([]string, error) {
 	var pulls []struct {
 		Head struct {
 			SHA string `json:"sha"`
@@ -240,7 +252,7 @@ func reportedOnLatestPull(ctx context.Context, org, repo string) ([]string, erro
 	}
 
 	path := fmt.Sprintf("/repos/%s/%s/pulls?state=all&sort=updated&direction=desc&per_page=1", org, repo)
-	if err := app.API(ctx, path, &pulls); err != nil {
+	if err := get(ctx, path, &pulls); err != nil {
 		if noEvidence(err) {
 			return nil, nil
 		}
@@ -252,7 +264,7 @@ func reportedOnLatestPull(ctx context.Context, org, repo string) ([]string, erro
 		return nil, nil
 	}
 
-	reported, err := reportedChecks(ctx, org, repo, pulls[0].Head.SHA)
+	reported, err := reportedChecksVia(ctx, get, org, repo, pulls[0].Head.SHA)
 	if err != nil {
 		if noEvidence(err) {
 			return nil, nil
@@ -266,6 +278,11 @@ func reportedOnLatestPull(ctx context.Context, org, repo string) ([]string, erro
 
 // reportedChecks lists the check-run names on a branch's HEAD.
 func reportedChecks(ctx context.Context, org, repo, branch string) ([]string, error) {
+	return reportedChecksVia(ctx, app.API, org, repo, branch)
+}
+
+// reportedChecksVia is reportedChecks with the GitHub read passed in.
+func reportedChecksVia(ctx context.Context, get getFunc, org, repo, branch string) ([]string, error) {
 	var payload struct {
 		CheckRuns []struct {
 			Name string `json:"name"`
@@ -273,7 +290,7 @@ func reportedChecks(ctx context.Context, org, repo, branch string) ([]string, er
 	}
 
 	path := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?per_page=100", org, repo, branch)
-	if err := app.API(ctx, path, &payload); err != nil {
+	if err := get(ctx, path, &payload); err != nil {
 		return nil, fmt.Errorf("read check runs of %s/%s@%s: %w", org, repo, branch, err)
 	}
 
