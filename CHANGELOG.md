@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## Unreleased
+
+### Changed
+
+- **`preflight` no longer refuses a required check that is still running on the default branch's tip.** The guard that refuses a repository whose rule requires a context nothing has reported read the tip's check runs as final: a merge started the repository's CI, and until the required context's run existed the guard refused every deploy for as long as that CI took, with a message pointing at `checks_waived` for a workflow that was already running. A tip with a queued, waiting or in-progress check run is now "not yet known": the guard reads the commit before it (further back while those are pending too, up to ten) and takes the nearest commit whose CI has finished as the answer. If that yields nothing, the refusal says CI is still running and to run `preflight` again afterwards, and does not mention `checks_waived`. The second window, the latest pull request, now reads the latest pull request **into the default branch**, not the latest overall, so a newer pull request into another branch no longer hides a missing context. **Adoption:** nothing to change; a context that has really never reported, on a tip whose runs have all finished, refuses as before with the same message. A repository whose only pull requests target other branches and whose CI reports the required context only on pull requests now refuses, where it passed by accident.
+
 ## v0.25.0 — 2026-11-06
 
 ### Added

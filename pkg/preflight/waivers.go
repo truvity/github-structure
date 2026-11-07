@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 
 	app "github.com/truvity/github-structure/pkg/app"
 	registry "github.com/truvity/github-structure/pkg/registry"
@@ -167,9 +168,11 @@ func requiredChecksOf(resolved registry.Resolved) []string {
 //
 // The exit is deliberately generous: ANY of the required contexts having
 // reported clears the repo, in either of two windows: the default
-// branch's HEAD, and the head of the latest pull request (see below). A
-// repo that does not exist yet, or that has no commits at all, is
-// skipped — the run that creates a repository is not the run that can
+// branch's HEAD, and the head of the latest pull request into it (see
+// below). A HEAD whose CI is still queued or running has not finished
+// reporting: the guard reads the commits before it rather than calling
+// the context "never reported". A repo that does not exist yet, or that
+// has no commits at all, is skipped — the run that creates a repository is not the run that can
 // prove its CI.
 func checkUnreportedChecks(ctx context.Context, reg *registry.Config, org string) ([]string, error) {
 	return unreportedChecks(ctx, app.API, reg, org)
@@ -204,7 +207,7 @@ func unreportedChecks(ctx context.Context, get getFunc, reg *registry.Config, or
 			continue
 		}
 
-		reported, err := reportedChecksVia(ctx, get, org, name, resolved.DefaultBranch)
+		runs, err := checkRunsOf(ctx, get, org, name, resolved.DefaultBranch)
 		if err != nil {
 			if noEvidence(err) {
 				continue
@@ -213,13 +216,39 @@ func unreportedChecks(ctx context.Context, get getFunc, reg *registry.Config, or
 			return nil, err
 		}
 
-		// Second window: the most recent pull request's head. A required
-		// context is satisfied on a PR, and a repository whose CI fans
-		// in ONLY on pull_request reports nothing under that name on
-		// master — four public repositories are in exactly that shape,
-		// and probing the branch alone called every one of them broken.
+		reported := runNames(runs)
+
+		// A tip whose CI is still queued or running has not finished
+		// reporting, which is not the same as never having reported: a
+		// merge to the default branch would otherwise block this guard,
+		// and with it every deploy, for as long as the repository's CI
+		// takes. The answer is on the nearest commit before the tip whose
+		// CI has finished, so look there. A tip whose runs have all
+		// finished is not "yet" anything and is never looked behind.
+		pendingTip := ""
+
+		if len(reportedSuppressed(required, reported)) == 0 && anyPending(runs) {
+			var found bool
+
+			found, pendingTip, err = reportedBeforePendingTip(ctx, get, org, name, resolved.DefaultBranch, required)
+			if err != nil {
+				return nil, err
+			}
+
+			if found {
+				continue
+			}
+		}
+
+		// Second window: the most recent pull request into the default
+		// branch. A required context is satisfied on a PR, and a repository
+		// whose CI fans in ONLY on pull_request reports nothing under that
+		// name on master — four public repositories are in exactly that
+		// shape, and probing the branch alone called every one of them
+		// broken. A pull request into another branch says nothing about the
+		// rule on this one, so it is not read.
 		if len(reportedSuppressed(required, reported)) == 0 {
-			pullReported, err := reportedOnLatestPull(ctx, get, org, name)
+			pullReported, err := reportedOnLatestPull(ctx, get, org, name, resolved.DefaultBranch)
 			if err != nil {
 				return nil, err
 			}
@@ -228,6 +257,16 @@ func unreportedChecks(ctx context.Context, get getFunc, reg *registry.Config, or
 		}
 
 		if len(reportedSuppressed(required, reported)) == 0 {
+			if pendingTip != "" {
+				problems = append(problems, fmt.Sprintf(
+					"repo %q: requires %v, which is not known to have reported on %s yet — CI on %s is "+
+						"still queued or running, and the commits before it did not report it either. "+
+						"Run preflight again when that CI has finished",
+					name, required, resolved.DefaultBranch, shortSHA(pendingTip)))
+
+				continue
+			}
+
 			problems = append(problems, fmt.Sprintf(
 				"repo %q: requires %v, but nothing has reported it on %s or on its latest pull request — "+
 					"a required context no workflow produces blocks every pull request forever. Land the "+
@@ -239,19 +278,98 @@ func unreportedChecks(ctx context.Context, get getFunc, reg *registry.Config, or
 	return problems, nil
 }
 
+// maxPendingWalk bounds how many commits back from a pending tip the
+// guard looks for a finished one. Merges that land faster than the CI
+// finishes are rare; ten in a row is a queue that wants a human.
+const maxPendingWalk = 10
+
+// reportedBeforePendingTip walks back from the tip along first parents
+// until it finds a commit whose CI has finished, and reports whether any
+// commit on the way reported one of the required contexts. It returns the
+// tip's sha, which the caller names in its message.
+//
+// A commit that cannot be read (gone, or an empty history) ends the walk
+// without evidence rather than failing the guard, the same as the tip.
+func reportedBeforePendingTip(
+	ctx context.Context, get getFunc, org, repo, branch string, required []string,
+) (bool, string, error) {
+	var tip string
+
+	ref := branch
+
+	for range maxPendingWalk {
+		var commit struct {
+			SHA     string `json:"sha"`
+			Parents []struct {
+				SHA string `json:"sha"`
+			} `json:"parents"`
+		}
+
+		path := fmt.Sprintf("/repos/%s/%s/commits/%s", org, repo, ref)
+		if err := get(ctx, path, &commit); err != nil {
+			if noEvidence(err) {
+				return false, tip, nil
+			}
+
+			return false, tip, fmt.Errorf("read commit %s of %s/%s: %w", ref, org, repo, err)
+		}
+
+		if tip == "" {
+			tip = commit.SHA
+		}
+
+		if len(commit.Parents) == 0 {
+			return false, tip, nil
+		}
+
+		ref = commit.Parents[0].SHA
+
+		runs, err := checkRunsOf(ctx, get, org, repo, ref)
+		if err != nil {
+			if noEvidence(err) {
+				return false, tip, nil
+			}
+
+			return false, tip, err
+		}
+
+		if len(reportedSuppressed(required, runNames(runs))) > 0 {
+			return true, tip, nil
+		}
+
+		if !anyPending(runs) {
+			return false, tip, nil
+		}
+	}
+
+	return false, tip, nil
+}
+
+// shortSHA is the first seven characters of a commit id, as git shows it.
+func shortSHA(sha string) string {
+	const short = 7
+
+	if len(sha) > short {
+		return sha[:short]
+	}
+
+	return sha
+}
+
 // reportedOnLatestPull lists the check-run names on the head of the
-// repository's most recently updated pull request — the window where a
+// repository's most recently updated pull request into branch — the window where a
 // PR-only CI contract is visible at all. A repository that has never
 // had a pull request, or whose head commit is gone, reports nothing,
 // which is the honest answer to "does this context exist?".
-func reportedOnLatestPull(ctx context.Context, get getFunc, org, repo string) ([]string, error) {
+func reportedOnLatestPull(ctx context.Context, get getFunc, org, repo, branch string) ([]string, error) {
 	var pulls []struct {
 		Head struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s/pulls?state=all&sort=updated&direction=desc&per_page=1", org, repo)
+	path := fmt.Sprintf("/repos/%s/%s/pulls?state=all&base=%s&sort=updated&direction=desc&per_page=1",
+		org, repo, url.QueryEscape(branch))
 	if err := get(ctx, path, &pulls); err != nil {
 		if noEvidence(err) {
 			return nil, nil
@@ -264,7 +382,7 @@ func reportedOnLatestPull(ctx context.Context, get getFunc, org, repo string) ([
 		return nil, nil
 	}
 
-	reported, err := reportedChecksVia(ctx, get, org, repo, pulls[0].Head.SHA)
+	runs, err := checkRunsOf(ctx, get, org, repo, pulls[0].Head.SHA)
 	if err != nil {
 		if noEvidence(err) {
 			return nil, nil
@@ -273,33 +391,60 @@ func reportedOnLatestPull(ctx context.Context, get getFunc, org, repo string) ([
 		return nil, err
 	}
 
-	return reported, nil
+	return runNames(runs), nil
+}
+
+// checkRun is one check run on a commit: its name, and its status
+// (queued, in_progress, completed, ...).
+type checkRun struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
 }
 
 // reportedChecks lists the check-run names on a branch's HEAD.
 func reportedChecks(ctx context.Context, org, repo, branch string) ([]string, error) {
-	return reportedChecksVia(ctx, app.API, org, repo, branch)
+	runs, err := checkRunsOf(ctx, app.API, org, repo, branch)
+	if err != nil {
+		return nil, err
+	}
+
+	return runNames(runs), nil
 }
 
-// reportedChecksVia is reportedChecks with the GitHub read passed in.
-func reportedChecksVia(ctx context.Context, get getFunc, org, repo, branch string) ([]string, error) {
+// checkRunsOf lists the check runs on a ref: a branch (its HEAD) or a sha.
+func checkRunsOf(ctx context.Context, get getFunc, org, repo, ref string) ([]checkRun, error) {
 	var payload struct {
-		CheckRuns []struct {
-			Name string `json:"name"`
-		} `json:"check_runs"`
+		CheckRuns []checkRun `json:"check_runs"`
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?per_page=100", org, repo, branch)
+	path := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?per_page=100", org, repo, ref)
 	if err := get(ctx, path, &payload); err != nil {
-		return nil, fmt.Errorf("read check runs of %s/%s@%s: %w", org, repo, branch, err)
+		return nil, fmt.Errorf("read check runs of %s/%s@%s: %w", org, repo, ref, err)
 	}
 
-	names := make([]string, 0, len(payload.CheckRuns))
-	for _, run := range payload.CheckRuns {
+	return payload.CheckRuns, nil
+}
+
+func runNames(runs []checkRun) []string {
+	names := make([]string, 0, len(runs))
+	for _, run := range runs {
 		names = append(names, run.Name)
 	}
 
-	return names, nil
+	return names
+}
+
+// anyPending reports whether a run has not finished: queued, waiting or
+// in progress. Only "completed" is finished, so a status GitHub adds later
+// reads as pending, the safe side of "not yet known".
+func anyPending(runs []checkRun) bool {
+	for _, run := range runs {
+		if run.Status != "completed" {
+			return true
+		}
+	}
+
+	return false
 }
 
 // reportedSuppressed returns the suppressed contexts that are actually
