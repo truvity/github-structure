@@ -60,10 +60,25 @@ that does not exist yet answers 404 and is skipped, for the reason above.
 contract whose fan-in job runs on `pull_request` only reports nothing
 under that name on master. Four repositories were in exactly that shape,
 and a branch-only probe called every one of them broken — so the guard
-falls back to the head of the most recently updated pull request, where
-a required context is actually satisfied. A repository that has never
-had a pull request reports nothing in either window, which is the honest
-answer.
+falls back to the head of the most recently updated pull request into
+the default branch, where a required context is actually satisfied (a
+newer pull request into some other branch says nothing about this
+branch's rule). A repository that has never had a pull request reports
+nothing in either window, which is the honest answer.
+
+*A tip still running its CI has not reported yet, which is not "never".*
+Merging to a registered repository's default branch starts its CI, and
+until the required context's check run exists the tip reports nothing
+under that name. Read literally, the guard refused every deploy for as
+long as that CI took, and told the operator to add a waiver for a
+workflow that was already running. So when the tip has a check run that
+is queued, waiting or in progress, the guard looks at the commit before
+it (and further back while those are pending too, up to ten); the
+nearest commit whose CI has finished is where the answer is. If that
+yields nothing, the refusal says CI is still running and to run
+preflight again when it has finished, and does not point at a waiver.
+A tip whose runs have all finished is never looked behind, so a context
+that has really never reported still refuses with the waiver message.
 
 *And an empty repository answers 422, not 404.* "No commit found for SHA"
 is the same class of answer — there is nothing there yet — but it is
