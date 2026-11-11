@@ -97,6 +97,21 @@ on GitHub, rename its row, then re-key the stack's state with
 `<tool> --org <org> state rename-repo <old> <new>` (a dry run; `--apply`
 saves a backup and writes). See [docs/safety.md](docs/safety.md).
 
+## Platform part and company part
+
+**Platform part.** The platform admin applies the registry and the
+`github-structure` program to the GitHub organisations the platform runs,
+runs `preflight` before each apply and `drift` after it, and publishes each
+organisation's boundary with the `boundary` command. The registry file stays
+in the platform's own repository, not here.
+
+**Company part.** A company that owns rows in an organisation writes a
+fragment file inside that organisation's ceiling and checks it in its own CI
+with `validate-fragment` against the published boundary. Once the company's
+GitHub organisation stack has moved to the company's own repository, its SRE
+applies that stack with this library. See [docs/registry.md](docs/registry.md)
+for the fragment and the ceiling.
+
 ## Consumers
 
 Imported as a Go library by:
@@ -113,10 +128,12 @@ library.
 
 ## Neighbours
 
-- **ci-workflows**: defines the estate's component contract and CI discipline
-- **access-roster**: maintains the roster of people and groups; the registry
-  must refer to teams that access-roster can reconcile (teams are listed but
-  not created here)
+- **ci-workflows**: the shared CI that every repository calls, including the
+  opt-in check against the component contract (the contract itself is in
+  [policy](https://github.com/truvity/policy))
+- **sluis**: the identity issuer and directory hub; it maintains the roster of
+  people and groups; the registry must refer to teams that sluis can reconcile
+  (teams are listed but not created here)
 
 ## Documentation
 
