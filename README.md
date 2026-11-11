@@ -23,12 +23,13 @@ Extracted from a production estate that manages two organizations with
 it; the docs keep the incidents that shaped each rule, because the rule
 without its incident reads as pedantry.
 
-Part of a documentation triangle: this repo covers what a repository
+Part of a documentation set: this repo covers what a repository
 *is*; [ci-workflows](https://github.com/truvity/ci-workflows) covers
 what it *does* (see its `docs/estate-lifecycle.md` for the end-to-end
-path); [ci-plane](https://github.com/truvity/ci-plane) covers where CI
-*runs* and the artifact doctrine (`docs/normalization.md`). All three
-components are held to the [component contract](https://github.com/truvity/policy/blob/master/docs/contracts/component.md).
+path); [grun](https://github.com/truvity/grun) covers where CI *runs*
+and [ci-support](https://github.com/truvity/ci-support) the caches and
+builders beside the runners. Every public repository is held to the
+[component contract](https://github.com/truvity/policy/blob/master/docs/contracts/component.md).
 
 ## Who it is for
 
@@ -97,6 +98,22 @@ on GitHub, rename its row, then re-key the stack's state with
 `<tool> --org <org> state rename-repo <old> <new>` (a dry run; `--apply`
 saves a backup and writes). See [docs/safety.md](docs/safety.md).
 
+## Platform part and company part
+
+**Platform part.** The platform admin applies the GitHub organisation stack
+for the organisations the platform runs, built on this library (a Pulumi
+program the platform writes, gated by `preflight`), and attaches code security
+configurations with `github-structure security-configurations apply`. The
+registry file stays in a private repository of the platform, not here, and the
+`boundary` command prints the ceiling the platform publishes to companies.
+
+**Company part.** A company that owns rows in an organisation writes a
+fragment file inside that organisation's ceiling and checks it in its own CI
+with `validate-fragment` against the published boundary. Once the company's
+GitHub organisation stack has moved to the company's own repository, its SRE
+applies that stack with this library. See [docs/registry.md](docs/registry.md)
+for the fragment and the ceiling.
+
 ## Consumers
 
 Imported as a Go library by:
@@ -113,10 +130,12 @@ library.
 
 ## Neighbours
 
-- **ci-workflows**: defines the estate's component contract and CI discipline
-- **access-roster**: maintains the roster of people and groups; the registry
-  must refer to teams that access-roster can reconcile (teams are listed but
-  not created here)
+- **ci-workflows**: the shared CI that every repository calls, including the
+  opt-in check against the component contract (the contract itself is in
+  [policy](https://github.com/truvity/policy))
+- **sluis**: the identity issuer and directory hub; it maintains the roster of
+  people and groups; the registry must refer to teams that sluis can reconcile
+  (teams are listed but not created here)
 
 ## Documentation
 
