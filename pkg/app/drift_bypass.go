@@ -42,7 +42,10 @@ type (
 	}
 
 	liveRulesetDetail struct {
-		BypassActors []struct {
+		// A pointer: GitHub leaves bypass_actors out, rather than sending
+		// an empty list, when the token may not read them (a read-only
+		// App installation token). nil is "not visible", never "none".
+		BypassActors *[]struct {
 			ActorID   int64  `json:"actor_id"`
 			ActorType string `json:"actor_type"`
 		} `json:"bypass_actors"`
@@ -253,13 +256,7 @@ func checkRulesetActors(
 			return nil, err
 		}
 
-		got := make([]string, 0, len(detail.BypassActors))
-		for _, a := range detail.BypassActors {
-			got = append(got, a.ActorType+":"+strconv.FormatInt(a.ActorID, 10))
-		}
-
-		drifts = append(drifts,
-			compareBypassSets("repo "+name+" ruleset "+rs.Name, "bypass actors", want, got)...)
+		drifts = append(drifts, compareLiveBypass("repo "+name+" ruleset "+rs.Name, want, detail)...)
 
 		if n, stated := wantApprovals[rs.Name]; stated {
 			live, liveDismiss, liveCodeOwner := detail.pullRequestRule()
@@ -412,6 +409,21 @@ func declaredBranchActors(
 	}
 
 	return actors
+}
+
+// compareLiveBypass compares a ruleset's bypass actors, or reports them as
+// not visible when GitHub left them out of its answer.
+func compareLiveBypass(subject string, want []string, detail liveRulesetDetail) []Drift {
+	if detail.BypassActors == nil {
+		return []Drift{{Subject: subject, Field: "bypass actors", NotVisible: true}}
+	}
+
+	got := make([]string, 0, len(*detail.BypassActors))
+	for _, a := range *detail.BypassActors {
+		got = append(got, a.ActorType+":"+strconv.FormatInt(a.ActorID, 10))
+	}
+
+	return compareBypassSets(subject, "bypass actors", want, got)
 }
 
 // compareBypassSets reports the symmetric difference of two actor sets

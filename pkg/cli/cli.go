@@ -352,18 +352,36 @@ func (r *runner) drift(ctx context.Context, org string) error {
 		drifts = append(drifts, found...)
 	}
 
-	if len(drifts) == 0 {
-		_, _ = fmt.Fprintf(r.stdout(), "%s: %d variable rows, %d owner(s) and %d repo(s) match live GitHub\n",
-			org, len(orgVariables(orgCfg)), len(orgCfg.Owners), len(orgCfg.Repos))
+	// A field the token could not read is printed, so the run does not
+	// claim more than it compared, and is not a drift.
+	counted := 0
+
+	for _, d := range drifts {
+		_, _ = fmt.Fprintln(r.stdout(), d)
+
+		if !d.NotVisible {
+			counted++
+		}
+	}
+
+	if counted == 0 {
+		_, _ = fmt.Fprintf(r.stdout(), "%s: %d variable rows, %d owner(s) and %d repo(s) match live GitHub%s\n",
+			org, len(orgVariables(orgCfg)), len(orgCfg.Owners), len(orgCfg.Repos), notCompared(len(drifts)))
 
 		return nil
 	}
 
-	for _, d := range drifts {
-		_, _ = fmt.Fprintln(r.stdout(), d)
+	return fmt.Errorf("%d drift(s)%s", counted, notCompared(len(drifts)-counted))
+}
+
+// notCompared is the summary's note of the findings that were not visible to
+// the token, or nothing.
+func notCompared(n int) string {
+	if n == 0 {
+		return ""
 	}
 
-	return fmt.Errorf("%d drift(s)", len(drifts))
+	return fmt.Sprintf(" (%d not visible to this token, not compared)", n)
 }
 
 // entitlementsApply enforces the registry's Actions block.

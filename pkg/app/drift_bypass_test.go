@@ -113,3 +113,29 @@ func TestLivePullRequestRule(t *testing.T) {
 		})
 	}
 }
+
+// GitHub sends a ruleset to a read-only App installation token without its
+// bypass_actors. Left out is "not visible", never "no actors": an empty
+// list is still compared.
+func TestCompareLiveBypassTellsHiddenFromEmpty(t *testing.T) {
+	want := []string{"Integration:1"}
+
+	var hidden, empty liveRulesetDetail
+	if err := json.Unmarshal([]byte(`{"name":"master-check"}`), &hidden); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := json.Unmarshal([]byte(`{"name":"master-check","bypass_actors":[]}`), &empty); err != nil {
+		t.Fatal(err)
+	}
+
+	got := compareLiveBypass("repo widget ruleset master-check", want, hidden)
+	if len(got) != 1 || !got[0].NotVisible || got[0].Field != "bypass actors" {
+		t.Fatalf("hidden: %+v, want one not-visible line", got)
+	}
+
+	got = compareLiveBypass("repo widget ruleset master-check", want, empty)
+	if len(got) != 1 || got[0].NotVisible {
+		t.Fatalf("empty: %+v, want one drift for the missing actor", got)
+	}
+}

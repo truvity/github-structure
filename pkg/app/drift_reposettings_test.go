@@ -26,10 +26,16 @@ func publicish() (registry.Resolved, liveRepoSettings) {
 		Visibility:          "public",
 		Description:         "the install/lease service",
 		DefaultBranch:       "master",
-		AllowAutoMerge:      true,
-		AllowRebaseMerge:    true,
-		DeleteBranchOnMerge: true,
-		HasIssues:           true,
+		HasIssues:           ptr(true),
+		HasWiki:             ptr(false),
+		HasProjects:         ptr(false),
+		AllowAutoMerge:      ptr(true),
+		AllowSquashMerge:    ptr(false),
+		AllowMergeCommit:    ptr(false),
+		AllowRebaseMerge:    ptr(true),
+		DeleteBranchOnMerge: ptr(true),
+		AllowUpdateBranch:   ptr(false),
+		AllowForking:        ptr(false),
 	}
 
 	return want, live
@@ -47,7 +53,7 @@ func TestCompareRepoSettingsClean(t *testing.T) {
 // GitHub refuses, and the PR sits green and unmerged (gemaal#39).
 func TestCompareRepoSettingsDetectsUndeployedAutoMerge(t *testing.T) {
 	want, live := publicish()
-	live.AllowAutoMerge = false
+	live.AllowAutoMerge = ptr(false)
 
 	drifts := compareRepoSettings("gemaal", want, live)
 	require.Len(t, drifts, 1)
@@ -82,16 +88,16 @@ func TestCompareRepoSettingsComparesEveryDeclaredField(t *testing.T) {
 		"visibility":             func(l *liveRepoSettings) { l.Visibility = "private" },
 		"description":            func(l *liveRepoSettings) { l.Description = "something else" },
 		"default_branch":         func(l *liveRepoSettings) { l.DefaultBranch = "main" },
-		"allow_auto_merge":       func(l *liveRepoSettings) { l.AllowAutoMerge = false },
-		"allow_squash_merge":     func(l *liveRepoSettings) { l.AllowSquashMerge = true },
-		"allow_merge_commit":     func(l *liveRepoSettings) { l.AllowMergeCommit = true },
-		"allow_rebase_merge":     func(l *liveRepoSettings) { l.AllowRebaseMerge = false },
-		"delete_branch_on_merge": func(l *liveRepoSettings) { l.DeleteBranchOnMerge = false },
-		"allow_update_branch":    func(l *liveRepoSettings) { l.AllowUpdateBranch = true },
-		"allow_forking":          func(l *liveRepoSettings) { l.AllowForking = true },
-		"has_issues":             func(l *liveRepoSettings) { l.HasIssues = false },
-		"has_wiki":               func(l *liveRepoSettings) { l.HasWiki = true },
-		"has_projects":           func(l *liveRepoSettings) { l.HasProjects = true },
+		"allow_auto_merge":       func(l *liveRepoSettings) { l.AllowAutoMerge = ptr(false) },
+		"allow_squash_merge":     func(l *liveRepoSettings) { l.AllowSquashMerge = ptr(true) },
+		"allow_merge_commit":     func(l *liveRepoSettings) { l.AllowMergeCommit = ptr(true) },
+		"allow_rebase_merge":     func(l *liveRepoSettings) { l.AllowRebaseMerge = ptr(false) },
+		"delete_branch_on_merge": func(l *liveRepoSettings) { l.DeleteBranchOnMerge = ptr(false) },
+		"allow_update_branch":    func(l *liveRepoSettings) { l.AllowUpdateBranch = ptr(true) },
+		"allow_forking":          func(l *liveRepoSettings) { l.AllowForking = ptr(true) },
+		"has_issues":             func(l *liveRepoSettings) { l.HasIssues = ptr(false) },
+		"has_wiki":               func(l *liveRepoSettings) { l.HasWiki = ptr(true) },
+		"has_projects":           func(l *liveRepoSettings) { l.HasProjects = ptr(true) },
 	}
 
 	for field, mutate := range flip {
@@ -104,4 +110,23 @@ func TestCompareRepoSettingsComparesEveryDeclaredField(t *testing.T) {
 			assert.Equal(t, field, drifts[0].Field)
 		})
 	}
+}
+
+func ptr(b bool) *bool { return &b }
+
+// A read-only App installation token gets the repository without its merge
+// settings. A field GitHub left out is reported once, as not visible, and is
+// never compared as false; the fields it did send are still compared.
+func TestCompareRepoSettingsReportsHiddenFieldsAsNotVisible(t *testing.T) {
+	want, live := publicish()
+	live.AllowAutoMerge = nil
+	live.DeleteBranchOnMerge = nil
+	live.DefaultBranch = "main"
+
+	drifts := compareRepoSettings("gemaal", want, live)
+	require.Len(t, drifts, 2)
+
+	assert.Equal(t, Drift{Subject: "repo gemaal", Field: "default_branch", Want: "master", Got: "main"}, drifts[0])
+	assert.Equal(t, Drift{Subject: "repo gemaal", Field: "allow_auto_merge, delete_branch_on_merge", NotVisible: true}, drifts[1])
+	assert.Equal(t, "repo gemaal: allow_auto_merge, delete_branch_on_merge: not visible to this token, not compared", drifts[1].String())
 }

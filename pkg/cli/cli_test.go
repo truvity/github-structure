@@ -93,6 +93,42 @@ func TestDriftReportsEachFindingAndCountsThem(t *testing.T) {
 	assert.Contains(t, errb.String(), "1 drift(s)")
 }
 
+// A field the token could not read is printed and not counted: alone, the
+// run is clean and says how much it did not compare; beside a real drift,
+// only the drift counts.
+func TestDriftPrintsWhatIsNotVisibleWithoutCountingIt(t *testing.T) {
+	hidden := app.Drift{Subject: "repo widget", Field: "allow_auto_merge", NotVisible: true}
+
+	t.Run("alone", func(t *testing.T) {
+		var calls []string
+
+		chk := script(&calls)
+		chk.repoSettings = func(context.Context, string, *registry.Config) ([]app.Drift, error) {
+			return []app.Drift{hidden}, nil
+		}
+
+		r, out, errb := newRunner(t, chk)
+
+		assert.Equal(t, 0, r.run(context.Background(), []string{"drift"}), errb.String())
+		assert.Equal(t, "repo widget: allow_auto_merge: not visible to this token, not compared\n"+
+			"acme: 0 variable rows, 0 owner(s) and 1 repo(s) match live GitHub (1 not visible to this token, not compared)\n", out.String())
+	})
+
+	t.Run("beside a drift", func(t *testing.T) {
+		var calls []string
+
+		chk := script(&calls)
+		chk.repoSettings = func(context.Context, string, *registry.Config) ([]app.Drift, error) {
+			return []app.Drift{hidden, {Subject: "repo widget", Field: "default_branch", Want: "master", Got: "main"}}, nil
+		}
+
+		r, _, errb := newRunner(t, chk)
+
+		assert.Equal(t, 1, r.run(context.Background(), []string{"drift"}))
+		assert.Contains(t, errb.String(), "1 drift(s) (1 not visible to this token, not compared)")
+	})
+}
+
 func TestDriftStopsAtTheFirstReadError(t *testing.T) {
 	var calls []string
 
