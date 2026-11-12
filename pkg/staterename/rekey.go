@@ -406,7 +406,7 @@ func (rn *renamer) moveName(name string) string {
 }
 
 // rename maps a resource name carrying the old repository name to the name
-// carrying the new one, in the engine's six shapes.
+// carrying the new one, in the engine's shapes.
 func (rn *renamer) rename(name string) (string, bool) {
 	for _, p := range []string{prefixRepo, prefixActions, prefixWorkflowPerm, prefixProtection} {
 		if name == p+rn.from {
@@ -416,6 +416,15 @@ func (rn *renamer) rename(name string) (string, bool) {
 
 	if rest, ok := strings.CutPrefix(name, prefixRuleset+rn.from+"-"); ok {
 		return prefixRuleset + rn.to + "-" + rest, true
+	}
+
+	// A policy first: its prefix starts with the environment's.
+	if rest, ok := strings.CutPrefix(name, prefixEnvPolicy+rn.from+"-"); ok {
+		return prefixEnvPolicy + rn.to + "-" + rest, true
+	}
+
+	if rest, ok := strings.CutPrefix(name, prefixEnvironment+rn.from+"-"); ok {
+		return prefixEnvironment + rn.to + "-" + rest, true
 	}
 
 	for _, slug := range rn.teams {

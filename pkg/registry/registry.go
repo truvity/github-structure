@@ -460,6 +460,14 @@ type (
 		// see validateWorkflowOnlyTags. Patterns that could match a root
 		// release tag (v*) are refused.
 		WorkflowOnlyTags []string `yaml:"workflow_only_tags,omitempty"`
+		// Environments are the repository's deployment environments by
+		// name (`production`): each restricts which branches and tags may
+		// deploy to it and which team must approve a job before it runs.
+		// The engine adopts an environment that exists and creates one
+		// that does not; an environment the row does not name is left
+		// alone, so retiring one is a manual deletion after its last
+		// workflow has moved. See Environment.
+		Environments map[string]Environment `yaml:"environments,omitempty"`
 		// BranchRulesets are repository rulesets targeting branches —
 		// today expressing exactly one shape: a pull-request approval
 		// requirement that named GitHub Apps may bypass. This exists
@@ -1643,6 +1651,10 @@ func (c *Config) validateRepos(login string, org *Org) error {
 			return err
 		}
 
+		if err := validateEnvironments(login, name, org, repo); err != nil {
+			return err
+		}
+
 		// An archived repo declares nothing but the repository itself,
 		// so anything that only shapes the resources it no longer has is
 		// inert. Silently-inert config is how a row comes to mean
@@ -1677,6 +1689,11 @@ func (c *Config) validateRepos(login string, org *Org) error {
 			if len(repo.WorkflowOnlyTags) > 0 {
 				return fmt.Errorf("org %q repo %q: archived, so workflow_only_tags do nothing — an archived"+
 					" repository is read-only and runs no release workflow. Delete them, or unarchive", login, name)
+			}
+
+			if len(repo.Environments) > 0 {
+				return fmt.Errorf("org %q repo %q: archived, so environments do nothing — an archived"+
+					" repository is read-only and runs no deployment. Delete them, or unarchive", login, name)
 			}
 
 			// Protection below is resolved from the profile and never

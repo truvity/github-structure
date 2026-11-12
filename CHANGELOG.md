@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.28.0
+
+### Added
+
+- **A repository row's `environments:` declares its deployment environments.** A map from the environment name a workflow writes after `environment:` to `branches` and `tags` (the deployment policy), `reviewer_teams` (org team slugs that must approve a job) and `prevent_self_review`. The engine renders one `RepositoryEnvironment` per entry and one `RepositoryEnvironmentDeploymentPolicy` per branch or tag pattern. An environment that is live is imported (`repo:environment`), a live policy of the same kind and pattern is imported (`repo:environment:id`), anything else is created. Both are retained on delete: dropping an entry from the row stops the engine managing it and deletes nothing, because deleting an environment deletes its secrets and variables with it. An environment the row does not name is left alone. The state re-key moves the new resources with a renamed repository. The loader refuses an inexact name, an empty, duplicate, whitespace or `refs/`-qualified pattern, `*` or `**` (they allow every ref), a reviewer team the org does not have, more than six reviewers, `prevent_self_review` without a reviewer, and environments on an archived repository. **Adoption:** nothing to change unless a row declares environments. A row that does needs the engine App's repository permission **Environments: read and write**; the run stops and names it when it is missing, and a repository that declares none never asks. The drift check does not compare environments.
+
 ## v0.27.0
 
 ### Changed

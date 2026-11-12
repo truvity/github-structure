@@ -91,6 +91,12 @@ orgs:
         workflow_only_tags:       # tags only the repo's own release
           - deploy/pulumi/v*      # workflow may write (see below)
         branch_rulesets: [...]
+        environments:             # deployment environments (see below)
+          production:
+            branches: [main]
+            tags: ["v*"]
+            reviewer_teams: [team-release]
+            prevent_self_review: true
     runner_groups: {…}
 ```
 
@@ -234,6 +240,54 @@ No team, no organization admin.
   take literal text, `?`, `*` (not across `/`) and `**`.
 - The drift check expects the ruleset to exist and its bypass set to be
   exactly the integration.
+
+**Environments** are a row's `environments:`, a map from the name a
+workflow writes after `environment:` to what gates a job that names it:
+
+```yaml
+      service:
+        preset: private
+        environments:
+          dev: {}                       # any ref may deploy, nobody reviews
+          stage: {branches: [main], tags: ["v*"]}
+          production:
+            branches: [main]
+            tags: ["v*"]
+            reviewer_teams: [team-release]   # org team slugs, at most six
+            prevent_self_review: true
+```
+
+- `branches` and `tags` are the deployment policy: patterns relative to
+  `refs/heads/` and `refs/tags/` (`main`, `release/*`, `v*`; no `refs/`
+  prefix). Both empty means any ref may deploy. Each pattern renders one
+  `RepositoryEnvironmentDeploymentPolicy`; the environment then allows
+  custom policies only.
+- `reviewer_teams` are team slugs of the org, each resolved to its numeric
+  id, who must approve a job before it runs (one of them is enough).
+  Reviewers need at least read access to the repository.
+  `prevent_self_review` stops the person who triggered a job from approving
+  it and needs a reviewer to mean anything.
+- The name is exact: letters, digits, `.`, `-`, `_`. A cloud trust can pin
+  it, so no space, slash or wildcard is allowed. Patterns of `*` or `**`
+  are refused: they allow every ref, which is the same as no policy.
+- **Import, never recreate.** An environment that is live is imported
+  (`repo:environment`), a live policy of the same kind and pattern is
+  imported (`repo:environment:id`); anything else is created. Reading them
+  needs the engine App's repository permission **Environments: read and
+  write**; without it the run stops and says so, and a repository that
+  declares no environments never asks.
+- **Retained on delete.** Dropping an environment or a pattern from the row
+  stops the engine managing it and deletes nothing: deleting an
+  environment deletes its secrets and variables with it, which this stack
+  never held. An environment the row does not name is left alone (the
+  engine adds and adopts, it does not enumerate), so retiring one is a
+  manual deletion after its last workflow has moved.
+- Not compared by the drift check: a policy added or an environment edited
+  by hand shows up in the next preview, not in `drift`.
+- Refused at load: a name that is not exact; an empty, duplicate,
+  whitespace or `refs/`-qualified pattern; a reviewer team the org does not
+  have, listed twice, or more than six; `prevent_self_review` without a
+  reviewer; any of it on an archived repository.
 
 **Waivers by reason** are the org's `checks_waived:` — a map from the
 reason to the repositories it covers. It is the same fact as the row's
