@@ -557,6 +557,10 @@ func deployRepos(
 			if err := deployReviewGate(c, name, live.installedApps, resolved, provider); err != nil {
 				return fmt.Errorf("repo %s review gate: %w", name, err)
 			}
+
+			if err := deployEnvironments(c, name, repo, orgCfg.Repos[name], teams, live, provider); err != nil {
+				return fmt.Errorf("repo %s environments: %w", name, err)
+			}
 		}
 
 		if err := deployTeamGrants(c, name, resolved, teams, live, provider); err != nil {
@@ -811,6 +815,141 @@ func deployRepoActions(
 	}, opts...)
 
 	return err
+}
+
+// deployEnvironments declares a repository's deployment environments: one
+// RepositoryEnvironment each, and one RepositoryEnvironmentDeploymentPolicy
+// for every branch or tag pattern the row allows to deploy to it.
+//
+// Check-then-import, like the repository: an environment that is live is
+// imported by "repo:environment", which is also the id the resource gets when
+// it is created, so the next run's import names the id already in state and
+// is a no-op (the repository's reasoning, unlike branch protection's). A
+// deployment policy is imported by "repo:environment:id" when a policy with
+// the same kind and pattern is live. The numeric id is GitHub's, read before
+// anything was declared (liveState.readEnvironments).
+//
+// Both are RETAINED on delete. Dropping an environment from the registry
+// means "stop managing it", never "delete it": deleting an environment
+// deletes its secrets and variables with it, which this stack never held.
+// Retiring one is a manual deletion after its last workflow has moved.
+//
+// An environment the row does not name is left alone: the engine adds and
+// adopts, it does not enumerate.
+func deployEnvironments(
+	c *pulumi.Context,
+	repoName string,
+	repo *github.Repository,
+	row *registry.Repo,
+	teams map[string]*github.Team,
+	live *liveState,
+	provider *github.Provider,
+) error {
+	if row == nil {
+		return nil
+	}
+
+	for _, envName := range row.SortedEnvironments() {
+		env := row.Environments[envName]
+
+		args := &github.RepositoryEnvironmentArgs{
+			Repository:        repo.Name,
+			Environment:       pulumi.String(envName),
+			PreventSelfReview: pulumi.Bool(env.PreventSelfReview),
+		}
+
+		if env.HasBranchPolicy() {
+			args.DeploymentBranchPolicy = &github.RepositoryEnvironmentDeploymentBranchPolicyArgs{
+				ProtectedBranches:    pulumi.Bool(false),
+				CustomBranchPolicies: pulumi.Bool(true),
+			}
+		}
+
+		if len(env.ReviewerTeams) > 0 {
+			ids := make(pulumi.IntArray, 0, len(env.ReviewerTeams))
+
+			for _, slug := range env.ReviewerTeams {
+				team, ok := teams[slug]
+				if !ok {
+					// Validation guarantees the team row exists; missing here
+					// means it failed to deploy, which fails the run earlier.
+					return fmt.Errorf("environment %s: reviewer team %q not deployed", envName, slug)
+				}
+
+				ids = append(ids, team.ID().ToStringOutput().ApplyT(strconv.Atoi).(pulumi.IntOutput))
+			}
+
+			args.Reviewers = github.RepositoryEnvironmentReviewerArray{
+				github.RepositoryEnvironmentReviewerArgs{Teams: ids},
+			}
+		}
+
+		opts := []pulumi.ResourceOption{pulumi.Provider(provider), pulumi.RetainOnDelete(true)}
+
+		if live.environmentExists(repoName, envName) {
+			opts = append(opts, pulumi.Import(pulumi.ID(repoName+":"+envName)))
+		}
+
+		environment, err := github.NewRepositoryEnvironment(c, "environment-"+repoName+"-"+envName, args, opts...)
+		if err != nil {
+			return fmt.Errorf("environment %s: %w", envName, err)
+		}
+
+		if err := deployEnvironmentPolicies(c, repoName, envName, repo, environment, env, live, provider); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// deployEnvironmentPolicies declares an environment's deployment policies,
+// one per branch pattern and one per tag pattern.
+func deployEnvironmentPolicies(
+	c *pulumi.Context,
+	repoName, envName string,
+	repo *github.Repository,
+	environment *github.RepositoryEnvironment,
+	env registry.Environment,
+	live *liveState,
+	provider *github.Provider,
+) error {
+	declare := func(kind, pattern string, args *github.RepositoryEnvironmentDeploymentPolicyArgs) error {
+		args.Repository = repo.Name
+		args.Environment = environment.Environment
+
+		opts := []pulumi.ResourceOption{pulumi.Provider(provider), pulumi.RetainOnDelete(true)}
+
+		if id, ok := live.policyID(repoName, envName, kind, pattern); ok {
+			opts = append(opts, pulumi.Import(pulumi.ID(repoName+":"+envName+":"+id)))
+		}
+
+		name := "environment-policy-" + repoName + "-" + envName + "-" + kind + "-" + pattern
+
+		if _, err := github.NewRepositoryEnvironmentDeploymentPolicy(c, name, args, opts...); err != nil {
+			return fmt.Errorf("environment %s %s policy %q: %w", envName, kind, pattern, err)
+		}
+
+		return nil
+	}
+
+	for _, pattern := range env.Branches {
+		if err := declare("branch", pattern, &github.RepositoryEnvironmentDeploymentPolicyArgs{
+			BranchPattern: pulumi.String(pattern),
+		}); err != nil {
+			return err
+		}
+	}
+
+	for _, pattern := range env.Tags {
+		if err := declare("tag", pattern, &github.RepositoryEnvironmentDeploymentPolicyArgs{
+			TagPattern: pulumi.String(pattern),
+		}); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // deployProtection declares the default branch's protection rule.

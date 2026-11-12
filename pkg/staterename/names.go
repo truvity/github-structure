@@ -16,6 +16,8 @@ const (
 	prefixProtection   = "protection-"
 	prefixRuleset      = "ruleset-"
 	prefixGrant        = "grant-"
+	prefixEnvironment  = "environment-"
+	prefixEnvPolicy    = "environment-policy-"
 )
 
 // ResourceNames are the engine resource names of the row repo in org: the
@@ -81,6 +83,18 @@ func namesFor(cfg *registry.Config, org, row, as string) (required, optional []s
 
 		if gate := registry.ReviewGate(resolved); gate != nil {
 			add(&required, prefixRuleset+as+"-"+gate.Name)
+		}
+
+		for _, env := range r.SortedEnvironments() {
+			add(&required, prefixEnvironment+as+"-"+env)
+
+			for _, p := range r.Environments[env].Branches {
+				add(&required, prefixEnvPolicy+as+"-"+env+"-branch-"+p)
+			}
+
+			for _, p := range r.Environments[env].Tags {
+				add(&required, prefixEnvPolicy+as+"-"+env+"-tag-"+p)
+			}
 		}
 	}
 

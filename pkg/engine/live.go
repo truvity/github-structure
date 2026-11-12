@@ -34,6 +34,14 @@ type liveState struct { //nolint:grouper // one type in this file; a group of on
 	// exists — team-and-repo existing is not enough (2026-08-01: 29 new
 	// grants for a freshly created team all failed as bogus imports).
 	grants map[string]map[string]bool
+	// environments maps a repository to the set of its deployment
+	// environments that already exist, read only for a repository whose row
+	// declares some. An environment is imported ONLY when it is live.
+	environments map[string]map[string]bool
+	// envPolicies maps "repo/environment" to the environment's existing
+	// deployment policies, by "branch:<pattern>" or "tag:<pattern>", to the
+	// policy's numeric id, which is part of its import id.
+	envPolicies map[string]map[string]string
 	// billingEmail is the org's CURRENT billing address. Billing is the
 	// IT team's, managed in the UI — but the provider's settings
 	// resource requires the field, so the engine passes the live value
@@ -76,6 +84,9 @@ func readLiveState(
 		repos:      make(map[string]bool, len(orgCfg.Repos)),
 		emptyRepos: make(map[string]bool, len(orgCfg.Repos)),
 		grants:     make(map[string]map[string]bool),
+
+		environments: make(map[string]map[string]bool),
+		envPolicies:  make(map[string]map[string]string),
 	}
 
 	if err := state.readTeams(ctx, client, org); err != nil {
@@ -121,7 +132,98 @@ func readLiveState(
 		}
 	}
 
+	if err := state.readEnvironments(ctx, client, org, orgCfg); err != nil {
+		return nil, err
+	}
+
 	return state, nil
+}
+
+// getter is the one call readEnvironments makes of the API client, so a test
+// can answer it.
+type getter interface {
+	Get(ctx context.Context, path string, dst any) error
+}
+
+// readEnvironments reads, for each EXISTING repository that declares
+// environments, which of them already exist and which deployment policies
+// they hold, so an environment or a policy is imported when it is live and
+// created when it is not.
+//
+// An unreadable answer stops the run: the engine App needs the repository
+// permission "Environments" to read and write them, and a missing one answers
+// 403 or 404. Reading that as "no environments" would plan creates for
+// environments that exist and fail at apply with a conflict.
+func (s *liveState) readEnvironments(ctx context.Context, client getter, org string, orgCfg *registry.Org) error {
+	for _, name := range orgCfg.SortedRepos() {
+		repo := orgCfg.Repos[name]
+		if repo == nil || repo.Archived || len(repo.Environments) == 0 || !s.repos[name] {
+			continue
+		}
+
+		var list struct {
+			Environments []struct {
+				Name string `json:"name"`
+			} `json:"environments"`
+		}
+
+		if err := client.Get(ctx, "/repos/"+org+"/"+name+"/environments?per_page=100", &list); err != nil {
+			return fmt.Errorf("list environments of repo %s: %w (the engine App needs the repository permission"+
+				" \"Environments\": read and write)", name, err)
+		}
+
+		live := make(map[string]bool, len(list.Environments))
+		for _, e := range list.Environments {
+			live[e.Name] = true
+		}
+
+		s.environments[name] = live
+
+		for _, env := range repo.SortedEnvironments() {
+			if !live[env] || !repo.Environments[env].HasBranchPolicy() {
+				continue
+			}
+
+			var policies struct {
+				BranchPolicies []struct {
+					ID   int64  `json:"id"`
+					Name string `json:"name"`
+					Type string `json:"type"`
+				} `json:"branch_policies"`
+			}
+
+			path := "/repos/" + org + "/" + name + "/environments/" + env + "/deployment-branch-policies?per_page=100"
+			if err := client.Get(ctx, path, &policies); err != nil && !errors.Is(err, app.ErrNotFound) {
+				return fmt.Errorf("list deployment policies of environment %s of repo %s: %w", env, name, err)
+			}
+
+			byPattern := make(map[string]string, len(policies.BranchPolicies))
+
+			for _, p := range policies.BranchPolicies {
+				kind := p.Type
+				if kind == "" {
+					kind = "branch"
+				}
+
+				byPattern[kind+":"+p.Name] = strconv.FormatInt(p.ID, 10)
+			}
+
+			s.envPolicies[name+"/"+env] = byPattern
+		}
+	}
+
+	return nil
+}
+
+// environmentExists reports whether a repository's environment is live.
+func (s *liveState) environmentExists(repo, env string) bool { return s.environments[repo][env] }
+
+// policyID returns the numeric id of a live deployment policy, by its kind
+// ("branch" or "tag") and pattern.
+func (s *liveState) policyID(repo, env, kind, pattern string) (string, bool) {
+	id, ok := s.envPolicies[repo+"/"+env][kind+":"+pattern]
+
+	return id, ok
 }
 
 func (s *liveState) readTeams(ctx context.Context, client *app.Client, org string) error {
