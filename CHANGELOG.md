@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.27.0
+
+### Changed
+
+- **`drift` reports a field the token cannot read as not visible, not as drift.** GitHub leaves a repository's merge settings (`allow_auto_merge`, `allow_squash_merge`, `allow_merge_commit`, `allow_rebase_merge`, `delete_branch_on_merge`, `allow_update_branch`) and a ruleset's `bypass_actors` out of its answer to a token that may not read them, such as a read-only App installation token. Drift read the missing settings as `false` and the missing actors as none, so every such repository and ruleset showed up as drift. A field that is left out is now one line per repository or ruleset, `<subject>: <fields>: not visible to this token, not compared`. It is printed and not counted: a run with nothing else is clean and its summary says how many lines were not compared, and a run with real drift counts only the drift. The fields GitHub does send are compared as before, and an empty `bypass_actors` list is still compared. **Adoption:** nothing to change for a caller with an admin token. A caller that reads with a narrower token now gets a clean exit where it got a false failure.
+
 ## v0.26.2 — 2026-11-11
 
 - Dependency updates.

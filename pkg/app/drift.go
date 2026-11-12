@@ -43,6 +43,13 @@ type (
 		Field   string
 		Want    string
 		Got     string
+		// NotVisible marks a finding that is no difference at all: GitHub
+		// left Field out of its answer, because the token may not read it
+		// (a read-only App installation token sees no merge settings and
+		// no ruleset bypass actors), so it was not compared. It is printed
+		// so a clean run does not claim more than it checked, and it is
+		// not counted as drift.
+		NotVisible bool
 	}
 
 	// liveVariable is what GitHub reports for one org variable.
@@ -59,24 +66,31 @@ type (
 	// the registry against nulls and report the whole fleet as clean. That
 	// is the exact failure this check exists to end.
 	liveRepoSettings struct {
-		Visibility          string `json:"visibility"`
-		Description         string `json:"description"`
-		DefaultBranch       string `json:"default_branch"`
-		Archived            bool   `json:"archived"`
-		HasIssues           bool   `json:"has_issues"`
-		HasWiki             bool   `json:"has_wiki"`
-		HasProjects         bool   `json:"has_projects"`
-		AllowAutoMerge      bool   `json:"allow_auto_merge"`
-		AllowSquashMerge    bool   `json:"allow_squash_merge"`
-		AllowMergeCommit    bool   `json:"allow_merge_commit"`
-		AllowRebaseMerge    bool   `json:"allow_rebase_merge"`
-		DeleteBranchOnMerge bool   `json:"delete_branch_on_merge"`
-		AllowUpdateBranch   bool   `json:"allow_update_branch"`
-		AllowForking        bool   `json:"allow_forking"`
+		Visibility    string `json:"visibility"`
+		Description   string `json:"description"`
+		DefaultBranch string `json:"default_branch"`
+		Archived      bool   `json:"archived"`
+		// The settings below are pointers: GitHub leaves a field out of
+		// the answer, rather than sending false, when the token may not
+		// read it. nil is "not visible", never "false".
+		HasIssues           *bool `json:"has_issues"`
+		HasWiki             *bool `json:"has_wiki"`
+		HasProjects         *bool `json:"has_projects"`
+		AllowAutoMerge      *bool `json:"allow_auto_merge"`
+		AllowSquashMerge    *bool `json:"allow_squash_merge"`
+		AllowMergeCommit    *bool `json:"allow_merge_commit"`
+		AllowRebaseMerge    *bool `json:"allow_rebase_merge"`
+		DeleteBranchOnMerge *bool `json:"delete_branch_on_merge"`
+		AllowUpdateBranch   *bool `json:"allow_update_branch"`
+		AllowForking        *bool `json:"allow_forking"`
 	}
 )
 
 func (d Drift) String() string {
+	if d.NotVisible {
+		return fmt.Sprintf("%s: %s: not visible to this token, not compared", d.Subject, d.Field)
+	}
+
 	return fmt.Sprintf("%s: %s: registry=%q live=%q", d.Subject, d.Field, d.Want, d.Got)
 }
 
@@ -560,10 +574,12 @@ func compareRepoSettings(name string, want registry.Resolved, got liveRepoSettin
 		}
 	}
 
+	var hidden []string
+
 	for _, c := range []struct {
 		field string
 		want  bool
-		got   bool
+		got   *bool
 	}{
 		{"allow_auto_merge", want.AllowAutoMerge, got.AllowAutoMerge},
 		{"allow_squash_merge", want.AllowSquashMerge, got.AllowSquashMerge},
@@ -576,14 +592,23 @@ func compareRepoSettings(name string, want registry.Resolved, got liveRepoSettin
 		{"has_wiki", want.HasWiki, got.HasWiki},
 		{"has_projects", want.HasProjects, got.HasProjects},
 	} {
-		if c.want != c.got {
+		switch {
+		case c.got == nil:
+			hidden = append(hidden, c.field)
+		case c.want != *c.got:
 			drifts = append(drifts, Drift{
 				Subject: subject,
 				Field:   c.field,
 				Want:    strconv.FormatBool(c.want),
-				Got:     strconv.FormatBool(c.got),
+				Got:     strconv.FormatBool(*c.got),
 			})
 		}
+	}
+
+	// One line for every field the token could not read: the repository's
+	// other fields were still compared.
+	if len(hidden) > 0 {
+		drifts = append(drifts, Drift{Subject: subject, Field: strings.Join(hidden, ", "), NotVisible: true})
 	}
 
 	return drifts
