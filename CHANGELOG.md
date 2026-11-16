@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.29.0
+
+### Added
+
+- **A tag ruleset takes `exclude:`, the ref patterns it leaves out.** A `tag_rulesets` body (inline or named) may list `exclude: [refs/tags/…]`; the engine renders them as the ruleset's `ref_name.exclude`, which until now was always empty. `pattern: refs/tags/v*` with `exclude: [refs/tags/v*-*]` gates stable tags only, and a second ruleset can gate `refs/tags/v*-rc.*`, leaving test tags to anyone with push access (trust-form/wallet design D12). The loader refuses an exclude that does not start with `refs/tags/`, one equal to the pattern, and a repeated one. A ruleset without the key renders the empty list it always did, so no existing ruleset changes. A changed exclude is an in-place update of the same ruleset (keyed on repository and name), never a replace. **Adoption:** nothing to change unless a ruleset declares `exclude`.
+
 ## v0.28.0
 
 ### Added
