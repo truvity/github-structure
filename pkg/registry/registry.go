@@ -677,6 +677,13 @@ type (
 		// Pattern is the fnmatch ref pattern the ruleset covers; it must
 		// start with refs/tags/ (this type expresses tag rulesets only).
 		Pattern string `yaml:"pattern"`
+		// Exclude are fnmatch ref patterns the ruleset does NOT cover,
+		// though Pattern matches them: `refs/tags/v*` with exclude
+		// `refs/tags/v*-*` gates stable tags and leaves pre-release and
+		// test tags to another ruleset (or to anyone with push access).
+		// Each must start with refs/tags/. Empty (the default) renders
+		// GitHub's empty exclude list, exactly as before the field.
+		Exclude []string `yaml:"exclude,omitempty"`
 		// BypassTeams are the org team slugs allowed to create, update
 		// and delete matching tags. At least one is required: a ruleset
 		// nobody can bypass makes the tag namespace permanently
@@ -848,7 +855,7 @@ func sameStrings(a, b []string) bool {
 // does not inherit the loader's KnownFields — and a typo in a ruleset
 // that loaded silently would be the one field this file never rejects.
 var tagRulesetKeys = map[string]bool{
-	"name": true, "pattern": true, "bypass_teams": true,
+	"name": true, "pattern": true, "exclude": true, "bypass_teams": true,
 	"bypass_apps": true, "bypass_org_admins": true,
 }
 
@@ -1867,6 +1874,24 @@ func validateTagRuleset(login, where string, org *Org, rs *TagRuleset, name stri
 	if !strings.HasPrefix(rs.Pattern, "refs/tags/") {
 		return fmt.Errorf("org %q %s: tag ruleset %q: pattern %q must start with refs/tags/",
 			login, where, name, rs.Pattern)
+	}
+
+	seen := map[string]bool{}
+
+	for _, ex := range rs.Exclude {
+		switch {
+		case !strings.HasPrefix(ex, "refs/tags/"):
+			return fmt.Errorf("org %q %s: tag ruleset %q: exclude %q must start with refs/tags/",
+				login, where, name, ex)
+		case ex == rs.Pattern:
+			return fmt.Errorf("org %q %s: tag ruleset %q: exclude %q equals the pattern, so the ruleset covers nothing",
+				login, where, name, ex)
+		case seen[ex]:
+			return fmt.Errorf("org %q %s: tag ruleset %q: exclude %q is listed twice",
+				login, where, name, ex)
+		}
+
+		seen[ex] = true
 	}
 
 	if len(rs.BypassTeams) == 0 {

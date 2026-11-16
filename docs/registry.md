@@ -87,7 +87,8 @@ orgs:
         tag_rulesets:             # bypass_teams reference declared teams
           - <name>                # …the org's named ruleset of that name
           - {name: …, pattern: refs/tags/…, bypass_teams: […],
-             bypass_apps: […]}     # …or a one-off body. App SLUGS, live
+             bypass_apps: […],     # …or a one-off body. App SLUGS, live
+             exclude: [refs/tags/…]}  # optional: refs the pattern matches but the ruleset leaves out
         workflow_only_tags:       # tags only the repo's own release
           - deploy/pulumi/v*      # workflow may write (see below)
         branch_rulesets: [...]
@@ -205,6 +206,19 @@ orgs:
         tag_rulesets:
           - {name: project-tags, pattern: "refs/tags/*/v*", bypass_teams: [role-release]}
 ```
+
+A tag ruleset's optional `exclude:` lists ref patterns the ruleset leaves
+out although its `pattern` matches them, rendered as the ruleset's
+`ref_name.exclude`. Each starts with `refs/tags/`; one that equals the
+pattern or repeats is refused. `pattern: refs/tags/v*` with
+`exclude: [refs/tags/v*-*]` gates stable tags only, and a second ruleset
+with `pattern: refs/tags/v*-rc.*` can gate release candidates, leaving
+other pre-release (test) tags to anyone with push access. Without the
+key the exclude list is empty, as it always was. A changed exclude
+updates the same ruleset in place (rulesets are keyed on repository and
+name), so the tags are never ungated during a deploy. `drift` compares
+bypass actors only; a hand change to a ruleset's patterns shows in the
+engine's refresh preview, as before.
 
 **Workflow-only tags** are a row's `workflow_only_tags:` — relative tag
 names (`deploy/pulumi/v*`, rendered as `refs/tags/deploy/pulumi/v*`) that

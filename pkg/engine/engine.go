@@ -1128,6 +1128,16 @@ func deployTagRulesets(
 			})
 		}
 
+		// The exclude list renders empty when the row has none, exactly
+		// as before the field existed: no diff for any existing ruleset.
+		// The resource is keyed on repository + name, so a changed
+		// exclude is an in-place update of the same ruleset, never a
+		// delete-and-create that would leave the tags ungated.
+		excludes := pulumi.StringArray{}
+		for _, ex := range rs.Exclude {
+			excludes = append(excludes, pulumi.String(ex))
+		}
+
 		_, err = github.NewRepositoryRuleset(c, "ruleset-"+repoName+"-"+rs.Name, &github.RepositoryRulesetArgs{
 			Name:        pulumi.String(rs.Name),
 			Repository:  pulumi.String(repoName),
@@ -1136,7 +1146,7 @@ func deployTagRulesets(
 			Conditions: &github.RepositoryRulesetConditionsArgs{
 				RefName: &github.RepositoryRulesetConditionsRefNameArgs{
 					Includes: pulumi.StringArray{pulumi.String(rs.Pattern)},
-					Excludes: pulumi.StringArray{},
+					Excludes: excludes,
 				},
 			},
 			Rules: &github.RepositoryRulesetRulesArgs{
