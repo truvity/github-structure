@@ -258,3 +258,61 @@ func TestDeployBranchRulesetsCodeOwnerReviewIsOptIn(t *testing.T) {
 	_, present := pr["requireCodeOwnerReview"]
 	assert.False(t, present, "requireCodeOwnerReview must not be rendered unasked")
 }
+
+// A default-branch gate with no App: one approval, a code owner's review,
+// stale approvals dismissed, no deletion or force push, and a team as the
+// only bypass actor, in mode pull_request (it merges its own pull
+// requests; a direct push stays refused for it). No organization-admin
+// actor is rendered because none was named.
+func TestDeployBranchRulesetsCodeOwnerGateWithTeamBypassOnly(t *testing.T) {
+	mocks := &teamIDMocks{seen: map[string]resource.PropertyMap{}}
+
+	err := pulumi.RunErr(func(ctx *pulumi.Context) error {
+		provider, err := github.NewProvider(ctx, "gh", &github.ProviderArgs{})
+		if err != nil {
+			return err
+		}
+
+		sre, err := github.NewTeam(ctx, "team-sre", &github.TeamArgs{Name: pulumi.String("sre")}, pulumi.Provider(provider))
+		if err != nil {
+			return err
+		}
+
+		return deployBranchRulesets(ctx, "widget", nil,
+			[]*registry.BranchRuleset{{
+				Name:                      "default-branch",
+				Pattern:                   "~DEFAULT_BRANCH",
+				RequiredApprovals:         1,
+				DismissStaleReviewsOnPush: true,
+				RequireCodeOwnerReview:    true,
+				BlockDeletion:             true,
+				BlockForcePush:            true,
+				BypassTeams:               []string{"sre"},
+			}},
+			map[string]*github.Team{"sre": sre},
+			provider)
+	}, pulumi.WithMocks("proj", "stack", mocks))
+	require.NoError(t, err)
+
+	in, ok := mocks.seen["ruleset-widget-default-branch"]
+	require.True(t, ok, "the ruleset is declared, keyed on repo + name; got %v", mocks.seen)
+
+	actors := in["bypassActors"].ArrayValue()
+	require.Len(t, actors, 1, "the team is the only bypass actor")
+
+	team := actors[0].ObjectValue()
+	assert.Equal(t, "Team", team["actorType"].StringValue())
+	assert.Equal(t, 4242.0, team["actorId"].NumberValue())
+	assert.Equal(t, "pull_request", team["bypassMode"].StringValue())
+
+	assert.Equal(t, "active", in["enforcement"].StringValue())
+
+	rules := in["rules"].ObjectValue()
+	assert.True(t, rules["deletion"].BoolValue())
+	assert.True(t, rules["nonFastForward"].BoolValue())
+
+	pr := rules["pullRequest"].ObjectValue()
+	assert.Equal(t, 1.0, pr["requiredApprovingReviewCount"].NumberValue())
+	assert.True(t, pr["requireCodeOwnerReview"].BoolValue())
+	assert.True(t, pr["dismissStaleReviewsOnPush"].BoolValue())
+}
