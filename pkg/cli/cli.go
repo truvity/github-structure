@@ -4,6 +4,7 @@
 //
 //	<tool> [--org <org>] drift                # registry vs live GitHub
 //	<tool> [--org <org>] entitlements apply   # write declared variables and scopes
+//	<tool> [--org <org>] immutable-releases plan|apply   # preview or write each row's immutable_releases
 //	<tool> [--org <org>] preflight            # what a structure apply would touch
 //	<tool> [--org <org>] state rename-repo <old> <new> [--apply]   # re-key the state of a renamed repository
 //	<tool> [--org <org>] boundary             # the org's fragment ceiling, as JSON
@@ -81,15 +82,18 @@ type (
 	// checks are the live reads and writes, a field so tests can replace
 	// GitHub with a script.
 	checks struct {
-		orgVariables func(ctx context.Context, org string, cfg *registry.Org) ([]app.Drift, error)
-		orgOwners    func(ctx context.Context, org string, cfg *registry.Org) ([]app.Drift, error)
-		undeclared   func(ctx context.Context, org string, cfg *registry.Org) ([]app.Drift, error)
-		repoSettings func(ctx context.Context, org string, cfg *registry.Config) ([]app.Drift, error)
-		bypass       func(ctx context.Context, org string, cfg *registry.Config) ([]app.Drift, error)
-		scopes       func(ctx context.Context, org string, cfg *registry.Config) ([]app.Drift, error)
-		reconcileVar func(ctx context.Context, org string, cfg *registry.Config) ([]string, error)
-		reconcileScp func(ctx context.Context, org string, cfg *registry.Config) ([]string, error)
-		preflight    func(ctx context.Context, o preflight.Opts) error
+		orgVariables   func(ctx context.Context, org string, cfg *registry.Org) ([]app.Drift, error)
+		orgOwners      func(ctx context.Context, org string, cfg *registry.Org) ([]app.Drift, error)
+		undeclared     func(ctx context.Context, org string, cfg *registry.Org) ([]app.Drift, error)
+		repoSettings   func(ctx context.Context, org string, cfg *registry.Config) ([]app.Drift, error)
+		bypass         func(ctx context.Context, org string, cfg *registry.Config) ([]app.Drift, error)
+		scopes         func(ctx context.Context, org string, cfg *registry.Config) ([]app.Drift, error)
+		immutable      func(ctx context.Context, org string, cfg *registry.Config) ([]app.Drift, error)
+		immutablePlan  func(ctx context.Context, org string, cfg *registry.Config) (app.ImmutablePlan, error)
+		immutableApply func(ctx context.Context, org string, plan app.ImmutablePlan) ([]string, error)
+		reconcileVar   func(ctx context.Context, org string, cfg *registry.Config) ([]string, error)
+		reconcileScp   func(ctx context.Context, org string, cfg *registry.Config) ([]string, error)
+		preflight      func(ctx context.Context, o preflight.Opts) error
 		// exportState and importState are the stack's state, as
 		// `pulumi stack export` and `import` read and write it.
 		exportState func(ctx context.Context, stack auto.Stack) (apitype.UntypedDeployment, error)
@@ -105,15 +109,18 @@ type (
 
 func liveChecks() checks {
 	return checks{
-		orgVariables: app.CheckOrgVariables,
-		orgOwners:    app.CheckOrgOwners,
-		undeclared:   app.CheckUndeclaredRepos,
-		repoSettings: app.CheckRepoSettings,
-		bypass:       app.CheckBypassSurfaces,
-		scopes:       app.CheckEntitlementScopes,
-		reconcileVar: app.ReconcileOrgVariables,
-		reconcileScp: app.ReconcileEntitlementScopes,
-		preflight:    preflight.Run,
+		orgVariables:   app.CheckOrgVariables,
+		orgOwners:      app.CheckOrgOwners,
+		undeclared:     app.CheckUndeclaredRepos,
+		repoSettings:   app.CheckRepoSettings,
+		bypass:         app.CheckBypassSurfaces,
+		scopes:         app.CheckEntitlementScopes,
+		immutable:      app.CheckImmutableReleases,
+		immutablePlan:  app.PlanImmutableReleases,
+		immutableApply: app.ApplyImmutableReleases,
+		reconcileVar:   app.ReconcileOrgVariables,
+		reconcileScp:   app.ReconcileEntitlementScopes,
+		preflight:      preflight.Run,
 		exportState: func(ctx context.Context, stack auto.Stack) (apitype.UntypedDeployment, error) {
 			return stack.Export(ctx)
 		},
@@ -161,6 +168,8 @@ func (r *runner) usage() string {
 	b.WriteString("commands:\n")
 	b.WriteString("  drift                compare the registry against live GitHub; non-zero on any drift\n")
 	b.WriteString("  entitlements apply   write every declared variable value/visibility, then PUT every declared scope\n")
+	b.WriteString("  immutable-releases   plan: show what each row's immutable_releases would change (writes nothing);\n")
+	b.WriteString("                       apply: switch the repositories that differ (a row that leaves it unset is never touched)\n")
 	b.WriteString("  state rename-repo    re-key the stack's state after a repository was renamed: <old> <new>;\n")
 	b.WriteString("                       a dry run unless --apply, which saves a backup first (--backup-dir,\n")
 	b.WriteString("                       default the user cache directory, not the working directory)\n")
@@ -249,6 +258,8 @@ func (r *runner) dispatch(ctx context.Context, org string, rest []string) error 
 		}
 
 		return r.drift(ctx, org)
+	case "immutable-releases":
+		return r.immutableReleases(ctx, org, rest[1:])
 	case "state":
 		return r.state(ctx, org, rest[1:])
 	case "boundary":
@@ -341,6 +352,10 @@ func (r *runner) drift(ctx context.Context, org string) error {
 		// dead zone where a missing entitlement looks exactly like a
 		// quiet day.
 		func() ([]app.Drift, error) { return r.chk.scopes(ctx, org, reg) },
+		// The immutable-releases setting of the rows that state one: a
+		// repository setting the Pulumi provider cannot manage, so a hand
+		// switch is visible nowhere else.
+		func() ([]app.Drift, error) { return r.chk.immutable(ctx, org, reg) },
 	}
 
 	for _, step := range steps {
@@ -425,6 +440,48 @@ func (r *runner) entitlementsApply(ctx context.Context, org string) error {
 	for _, a := range applied {
 		_, _ = fmt.Fprintln(r.stdout(), a)
 	}
+
+	return nil
+}
+
+// immutableReleases previews or applies each row's `immutable_releases`.
+//
+// `plan` reads GitHub and prints what `apply` would change; it writes
+// nothing and exits 0 whatever it finds (a plan is not a verdict, `drift`
+// is). `apply` plans again, then writes only the repositories that differ,
+// so it is safe to run on every deploy. A row that leaves the field unset
+// is not read and not written by either.
+func (r *runner) immutableReleases(ctx context.Context, org string, args []string) error {
+	if len(args) != 1 || (args[0] != "plan" && args[0] != "apply") {
+		return usageError("usage: immutable-releases plan|apply")
+	}
+
+	reg, _, err := r.lookup(org)
+	if err != nil {
+		return err
+	}
+
+	plan, err := r.chk.immutablePlan(ctx, org, reg)
+	if err != nil {
+		return err
+	}
+
+	for _, l := range plan.Lines() {
+		_, _ = fmt.Fprintln(r.stdout(), l)
+	}
+
+	if args[0] == "plan" {
+		_, _ = fmt.Fprintf(r.stdout(), "%s: %s\n", org, plan.Summary())
+
+		return nil
+	}
+
+	applied, err := r.chk.immutableApply(ctx, org, plan)
+	if err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintf(r.stdout(), "%s: %d repo(s) switched; %s\n", org, len(applied), plan.Summary())
 
 	return nil
 }

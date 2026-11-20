@@ -1149,11 +1149,7 @@ func deployTagRulesets(
 					Excludes: excludes,
 				},
 			},
-			Rules: &github.RepositoryRulesetRulesArgs{
-				Creation: pulumi.Bool(true),
-				Update:   pulumi.Bool(true),
-				Deletion: pulumi.Bool(true),
-			},
+			Rules:        tagRules(rs),
 			BypassActors: actors,
 		}, pulumi.Provider(provider))
 		if err != nil {
@@ -1162,6 +1158,29 @@ func deployTagRulesets(
 	}
 
 	return nil
+}
+
+// tagRules renders the acts a tag ruleset restricts. A row that names no
+// `rules:` renders all three, the inputs every ruleset had before the
+// field existed, so none of them plans a diff. A subset renders only the
+// acts it names: an unnamed act is left unset, which the provider reads
+// as not restricted, and which is what GitHub reads back for a ruleset
+// without that rule.
+func tagRules(rs *registry.TagRuleset) *github.RepositoryRulesetRulesArgs {
+	rules := &github.RepositoryRulesetRulesArgs{}
+
+	for _, rule := range rs.EffectiveRules() {
+		switch rule {
+		case "creation":
+			rules.Creation = pulumi.BoolPtr(true)
+		case "update":
+			rules.Update = pulumi.BoolPtr(true)
+		case "deletion":
+			rules.Deletion = pulumi.BoolPtr(true)
+		}
+	}
+
+	return rules
 }
 
 // deployWorkflowOnlyTags declares the one `workflow-only-tags` ruleset a
