@@ -34,6 +34,20 @@ func script(calls *[]string) checks {
 		repoSettings: func(context.Context, string, *registry.Config) ([]app.Drift, error) { return rec("settings")() },
 		bypass:       func(context.Context, string, *registry.Config) ([]app.Drift, error) { return rec("bypass")() },
 		scopes:       func(context.Context, string, *registry.Config) ([]app.Drift, error) { return rec("scopes")() },
+		immutable:    func(context.Context, string, *registry.Config) ([]app.Drift, error) { return rec("immutable")() },
+		immutablePlan: func(context.Context, string, *registry.Config) (app.ImmutablePlan, error) {
+			*calls = append(*calls, "immutable-plan")
+
+			return app.ImmutablePlan{
+				Changes: []app.ImmutableChange{{Repo: "widget", Want: true}},
+				InSync:  []string{"gadget"},
+			}, nil
+		},
+		immutableApply: func(context.Context, string, app.ImmutablePlan) ([]string, error) {
+			*calls = append(*calls, "immutable-apply")
+
+			return []string{"repo widget: immutable_releases: off -> on"}, nil
+		},
 		reconcileVar: func(context.Context, string, *registry.Config) ([]string, error) {
 			*calls = append(*calls, "apply-variables")
 
@@ -74,7 +88,7 @@ func TestDriftRunsEveryCheckInOrderAndSummarises(t *testing.T) {
 	r, out, errb := newRunner(t, script(&calls))
 
 	assert.Equal(t, 0, r.run(context.Background(), []string{"drift"}), errb.String())
-	assert.Equal(t, []string{"variables", "owners", "undeclared", "settings", "bypass", "scopes"}, calls)
+	assert.Equal(t, []string{"variables", "owners", "undeclared", "settings", "bypass", "scopes", "immutable"}, calls)
 	assert.Equal(t, "acme: 0 variable rows, 0 owner(s) and 1 repo(s) match live GitHub\n", out.String())
 }
 
@@ -142,6 +156,52 @@ func TestDriftStopsAtTheFirstReadError(t *testing.T) {
 	assert.Equal(t, 1, r.run(context.Background(), []string{"drift"}))
 	assert.Equal(t, []string{"variables"}, calls)
 	assert.Contains(t, errb.String(), "boom")
+}
+
+// `plan` previews and writes nothing; `apply` plans, then writes the plan.
+func TestImmutableReleasesPlanWritesNothing(t *testing.T) {
+	var calls []string
+
+	r, out, errb := newRunner(t, script(&calls))
+
+	assert.Equal(t, 0, r.run(context.Background(), []string{"immutable-releases", "plan"}), errb.String())
+	assert.Equal(t, []string{"immutable-plan"}, calls, "a plan never applies")
+	assert.Equal(t, "repo widget: immutable_releases: off -> on\nacme: 1 to change, 1 in sync, 0 not readable\n", out.String())
+}
+
+func TestImmutableReleasesApplyWritesThePlan(t *testing.T) {
+	var calls []string
+
+	r, out, errb := newRunner(t, script(&calls))
+
+	assert.Equal(t, 0, r.run(context.Background(), []string{"immutable-releases", "apply"}), errb.String())
+	assert.Equal(t, []string{"immutable-plan", "immutable-apply"}, calls)
+	assert.Contains(t, out.String(), "acme: 1 repo(s) switched; 1 to change, 1 in sync, 0 not readable")
+}
+
+func TestImmutableReleasesApplyRefusalIsAFailure(t *testing.T) {
+	var calls []string
+
+	chk := script(&calls)
+	chk.immutableApply = func(context.Context, string, app.ImmutablePlan) ([]string, error) {
+		return nil, errors.New("declared off, but the organization enforces it on")
+	}
+
+	r, _, errb := newRunner(t, chk)
+
+	assert.Equal(t, 1, r.run(context.Background(), []string{"immutable-releases", "apply"}))
+	assert.Contains(t, errb.String(), "organization enforces")
+}
+
+func TestImmutableReleasesNeedsAVerb(t *testing.T) {
+	var calls []string
+
+	r, _, errb := newRunner(t, script(&calls))
+
+	assert.Equal(t, 2, r.run(context.Background(), []string{"immutable-releases"}))
+	assert.Contains(t, errb.String(), "usage: immutable-releases plan|apply")
+	assert.Equal(t, 2, r.run(context.Background(), []string{"immutable-releases", "delete"}))
+	assert.Empty(t, calls)
 }
 
 func TestEntitlementsApplyWritesValuesBeforeScopes(t *testing.T) {

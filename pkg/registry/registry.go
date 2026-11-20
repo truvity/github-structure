@@ -22,6 +22,7 @@ import (
 	"io/fs"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -435,6 +436,18 @@ type (
 		// or unmanaged when there is none. Not an engine input: the
 		// attachment is reconciled over REST by pkg/seccfg.
 		SecurityConfiguration string `yaml:"security_configuration,omitempty"`
+		// ImmutableReleases is the repository's immutable-releases
+		// setting: true turns it on, false turns it off, and unset (nil)
+		// means NOT MANAGED: nothing reads it, drift ignores it and no
+		// command ever writes it. A pointer, because "unset" and "false"
+		// are different statements: false is a decision to have the
+		// setting off, and is applied.
+		//
+		// Not an engine input: the Pulumi GitHub provider has no resource
+		// for it, so it is reconciled over REST by pkg/app
+		// (`immutable-releases plan|apply`) and compared by `drift`.
+		// Refused on an archived repository, which GitHub will not write.
+		ImmutableReleases *bool `yaml:"immutable_releases,omitempty"`
 		// Teams are grants ADDED to this repo's access bundles, or upgrades
 		// of one. Removal is expressed by not listing the bundle, which is
 		// the whole point of splitting access from presets: it used to be
@@ -685,10 +698,18 @@ type (
 		// Each must start with refs/tags/. Empty (the default) renders
 		// GitHub's empty exclude list, exactly as before the field.
 		Exclude []string `yaml:"exclude,omitempty"`
-		// BypassTeams are the org team slugs allowed to create, update
-		// and delete matching tags. At least one is required: a ruleset
-		// nobody can bypass makes the tag namespace permanently
-		// unwritable, which is a bricked release path, not protection.
+		// Rules are the acts the ruleset restricts: any non-empty subset
+		// of creation, update and deletion. Unset restricts all three,
+		// exactly as before the field existed. `[creation]` restricts who
+		// may CREATE a matching tag and leaves moving and deleting it to
+		// anyone with push access; `[update, deletion]` (with no_bypass)
+		// makes a tag nobody can move or delete.
+		Rules []string `yaml:"rules,omitempty"`
+		// BypassTeams are the org team slugs allowed to act on matching
+		// tags (the acts Rules names). At least one is required unless
+		// NoBypass says otherwise: a ruleset nobody can bypass, written
+		// by accident, makes the tag namespace permanently unwritable,
+		// which is a bricked release path, not protection.
 		BypassTeams []string `yaml:"bypass_teams"`
 		// BypassApps are the slugs of Apps allowed the same tag acts as
 		// Integration actors — how a scheduled auto-release cuts its tag
@@ -705,6 +726,15 @@ type (
 		// ignores the documented 1 on write and returns 0 on read, so
 		// 0 is the only drift-free spelling).
 		BypassOrgAdmins bool `yaml:"bypass_org_admins,omitempty"`
+		// NoBypass declares, deliberately, that nobody bypasses this
+		// ruleset: not a team, not an App, not an organization admin.
+		// Without it a row naming no bypass team is refused, because a
+		// ruleset nobody can step over is usually a forgotten field. It
+		// is the shape for tags that must never move or be deleted
+		// (`rules: [update, deletion]`). Mutually exclusive with every
+		// bypass_* field. The same word and meaning as on a branch
+		// ruleset (BranchRuleset.NoBypass).
+		NoBypass bool `yaml:"no_bypass,omitempty"`
 		// Ref is the name a row wrote INSTEAD of a body — `tag_rulesets:
 		// [release-tags]` — pointing at the org's named ruleset of that
 		// name. Set by UnmarshalYAML when the list item is a bare
@@ -833,8 +863,32 @@ type (
 func (r *TagRuleset) sameBody(o *TagRuleset) bool {
 	return r.Pattern == o.Pattern &&
 		r.BypassOrgAdmins == o.BypassOrgAdmins &&
+		r.NoBypass == o.NoBypass &&
+		sameStrings(r.EffectiveRules(), o.EffectiveRules()) &&
 		sameStrings(r.BypassTeams, o.BypassTeams) &&
 		sameStrings(r.BypassApps, o.BypassApps)
+}
+
+// TagRuleRules are the three acts a tag ruleset can restrict, in the
+// order the engine renders them.
+var TagRuleRules = []string{"creation", "update", "deletion"}
+
+// EffectiveRules is the set of acts the ruleset restricts, in
+// TagRuleRules order: the row's Rules, or all three when it names none.
+func (r *TagRuleset) EffectiveRules() []string {
+	if len(r.Rules) == 0 {
+		return TagRuleRules
+	}
+
+	out := make([]string, 0, len(r.Rules))
+
+	for _, rule := range TagRuleRules {
+		if slices.Contains(r.Rules, rule) {
+			out = append(out, rule)
+		}
+	}
+
+	return out
 }
 
 func sameStrings(a, b []string) bool {
@@ -856,8 +910,8 @@ func sameStrings(a, b []string) bool {
 // does not inherit the loader's KnownFields — and a typo in a ruleset
 // that loaded silently would be the one field this file never rejects.
 var tagRulesetKeys = map[string]bool{
-	"name": true, "pattern": true, "exclude": true, "bypass_teams": true,
-	"bypass_apps": true, "bypass_org_admins": true,
+	"name": true, "pattern": true, "exclude": true, "rules": true, "bypass_teams": true,
+	"bypass_apps": true, "bypass_org_admins": true, "no_bypass": true,
 }
 
 // UnmarshalYAML lets a row's `tag_rulesets:` item be either a body or
@@ -1689,6 +1743,11 @@ func (c *Config) validateRepos(login string, org *Org) error {
 					" repository is read-only and takes no pull requests. Delete the field, or unarchive", login, name)
 			}
 
+			if repo.ImmutableReleases != nil {
+				return fmt.Errorf("org %q repo %q: archived, so immutable_releases does nothing — GitHub does not"+
+					" write the setting of an archived repository. Delete the field, or unarchive", login, name)
+			}
+
 			if len(repo.TagRulesets) > 0 {
 				return fmt.Errorf("org %q repo %q: archived, so tag_rulesets do nothing — an archived"+
 					" repository is read-only and takes no tag pushes to restrict. Delete them, or unarchive", login, name)
@@ -1838,7 +1897,8 @@ func (c *Config) declaredApprovals(repo *Repo) (int, []string) {
 
 // validateTagRulesets checks one repo's tag_rulesets rows: named,
 // tag-scoped, and bypassable by at least one existing team — a ruleset
-// nobody can bypass does not protect the namespace, it bricks it.
+// nobody can bypass does not protect the namespace, it bricks it —
+// unless the row says `no_bypass: true`, the deliberate form.
 func validateTagRulesets(login, name string, org *Org, repo *Repo) error {
 	seen := make(map[string]bool, len(repo.TagRulesets))
 
@@ -1899,9 +1959,18 @@ func validateTagRuleset(login, where string, org *Org, rs *TagRuleset, name stri
 		seen[ex] = true
 	}
 
-	if len(rs.BypassTeams) == 0 {
+	if err := validateTagRules(login, where, name, rs); err != nil {
+		return err
+	}
+
+	switch {
+	case rs.NoBypass && (len(rs.BypassTeams) > 0 || len(rs.BypassApps) > 0 || rs.BypassOrgAdmins):
+		return fmt.Errorf("org %q %s: tag ruleset %q: no_bypass contradicts the bypass_teams, bypass_apps"+
+			" or bypass_org_admins it also names — keep one", login, where, name)
+	case !rs.NoBypass && len(rs.BypassTeams) == 0:
 		return fmt.Errorf("org %q %s: tag ruleset %q: at least one bypass team is required —"+
-			" with none, nobody can ever create a matching tag", login, where, name)
+			" with none, nobody can ever act on a matching tag. A ruleset nobody may bypass,"+
+			" deliberately, says `no_bypass: true`", login, where, name)
 	}
 
 	for _, team := range rs.BypassTeams {
@@ -1917,6 +1986,37 @@ func validateTagRuleset(login, where string, org *Org, rs *TagRuleset, name stri
 	// the answer is authoritative rather than a copy of it.
 	if err := refuseAppIDSpellings(rs.BypassApps); err != nil {
 		return fmt.Errorf("org %q %s: tag ruleset %q: %w", login, where, name, err)
+	}
+
+	return nil
+}
+
+// validateTagRules holds a ruleset's `rules:` to a non-empty, repeat-free
+// subset of creation, update and deletion. An omitted key is the default
+// (all three); an explicit empty list is refused, because it would
+// restrict nothing.
+func validateTagRules(login, where, name string, rs *TagRuleset) error {
+	if rs.Rules == nil {
+		return nil
+	}
+
+	if len(rs.Rules) == 0 {
+		return fmt.Errorf("org %q %s: tag ruleset %q: rules is empty, so the ruleset restricts nothing —"+
+			" list creation, update and/or deletion, or drop the key for all three", login, where, name)
+	}
+
+	seen := map[string]bool{}
+
+	for _, rule := range rs.Rules {
+		switch {
+		case !slices.Contains(TagRuleRules, rule):
+			return fmt.Errorf("org %q %s: tag ruleset %q: rules entry %q is not one of creation, update, deletion",
+				login, where, name, rule)
+		case seen[rule]:
+			return fmt.Errorf("org %q %s: tag ruleset %q: rules entry %q is listed twice", login, where, name, rule)
+		}
+
+		seen[rule] = true
 	}
 
 	return nil

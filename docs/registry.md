@@ -54,6 +54,8 @@ orgs:
     tag_rulesets:                 # NAMED bodies, written once, that a
       <name>:                     # row references by name below
         {pattern: refs/tags/…, bypass_teams: […], bypass_apps: […]}
+                                  # also rules: […] and no_bypass: true,
+                                  # see "A tag ruleset's rules" below
     checks_waived:                # waivers grouped by REASON: the text
       <reason>: [<name>, …]       # once, the repositories as a list
     repos:
@@ -77,6 +79,10 @@ orgs:
                                   # security-configurations` (see README).
                                   # The org's
                                   # default_security_configuration fills it
+        immutable_releases: true  # optional; true|false. Unset = not
+                                  # managed (never read or written). Not an
+                                  # engine input: `immutable-releases
+                                  # plan|apply` and `drift` (see below)
         archived: true            # read-only rows: repo + nothing else
         checks_waived: >-         # free text, MUST carry its exit
           New repo, no CI yet. Exit: delete when ci.yaml reports
@@ -88,7 +94,9 @@ orgs:
           - <name>                # …the org's named ruleset of that name
           - {name: …, pattern: refs/tags/…, bypass_teams: […],
              bypass_apps: […],     # …or a one-off body. App SLUGS, live
-             exclude: [refs/tags/…]}  # optional: refs the pattern matches but the ruleset leaves out
+             exclude: [refs/tags/…],  # optional: refs the pattern matches but the ruleset leaves out
+             rules: [creation],    # optional: any of creation, update, deletion; default all three
+             no_bypass: true}      # optional: no bypass actor at all (instead of bypass_teams)
         workflow_only_tags:       # tags only the repo's own release
           - deploy/pulumi/v*      # workflow may write (see below)
         branch_rulesets: [...]
@@ -217,8 +225,80 @@ other pre-release (test) tags to anyone with push access. Without the
 key the exclude list is empty, as it always was. A changed exclude
 updates the same ruleset in place (rulesets are keyed on repository and
 name), so the tags are never ungated during a deploy. `drift` compares
-bypass actors only; a hand change to a ruleset's patterns shows in the
-engine's refresh preview, as before.
+bypass actors and the restricted acts (see below); a hand change to a
+ruleset's patterns shows in the engine's refresh preview, as before.
+
+**A tag ruleset's rules** are the acts it restricts. By default a ruleset
+restricts all three (`creation`, `update`, `deletion`) of the tags its
+pattern matches, to its bypass actors. `rules:` narrows that to any
+non-empty subset, written in any order, so two common shapes can be
+declared instead of kept by hand:
+
+```yaml
+    tag_rulesets:
+      - name: v2-tags-create          # who may CREATE a release tag
+        pattern: refs/tags/v2.*
+        rules: [creation]
+        bypass_teams: [release-team]
+      - name: v2-tags-immutable       # a tag nobody can move or delete
+        pattern: refs/tags/v2.*
+        rules: [update, deletion]
+        no_bypass: true
+```
+
+- An act the ruleset does not name is not restricted by it: with
+  `rules: [creation]`, anyone with push access may still move or delete a
+  matching tag, unless another ruleset restricts that.
+- A row without `rules:` renders exactly what it always did, so no existing
+  ruleset changes. An empty list, an unknown act or a repeated one is a
+  load error. `rules:` is part of a ruleset's body: an org-level named
+  ruleset carries it to every row that references it, and a row whose body
+  differs from the org's only in `rules:` is a one-off, not a copy.
+- `no_bypass: true` declares that nobody bypasses the ruleset: no team, no
+  App, no organization admin. It is the same word and meaning as on a
+  branch ruleset, and it is refused beside `bypass_teams`, `bypass_apps` or
+  `bypass_org_admins`. Without it a ruleset still needs at least one bypass
+  team, as before: a ruleset nobody can step over is more often a forgotten
+  field than a decision. `no_bypass` with `creation` among the rules (or
+  with no `rules:`, which means all three) freezes the namespace: nobody
+  can create a matching tag at all. That is allowed, because it is the
+  statement the field makes.
+- The drift check compares the acts the live ruleset restricts with the
+  declared ones (only the three above), as it compares the bypass actors,
+  so a rule removed or added by hand is reported.
+- **Adopting a ruleset that was made by hand** stays a one-off
+  `pulumi import` (the engine never check-then-imports a ruleset; see
+  [docs/safety.md](safety.md)). Import it under the engine's resource name
+  `ruleset-<repository>-<ruleset name>` with the id `<repository>:<ruleset
+  id>` (`github:index/repositoryRuleset:RepositoryRuleset`), then run the
+  preview: it should show no change once the row matches the live ruleset.
+
+**Immutable releases** are a row's `immutable_releases: true | false`, the
+repository's setting that makes a published release's tag and assets
+unchangeable. It is not a Pulumi resource: the provider has none, so it is
+reconciled over REST by `pkg/app` (`GET`, `PUT` and `DELETE
+/repos/{owner}/{repo}/immutable-releases`), the same way the org variables
+are.
+
+- **Unset means not managed.** A row without the field is never read,
+  compared or written, whatever GitHub says. `false` is a decision and is
+  applied, which is why the field is a pointer in the schema.
+- `immutable-releases plan` previews: one `repo <name>: immutable_releases:
+  <live> -> <declared>` line per repository that differs, nothing written.
+  `immutable-releases apply` plans again and writes only those, `PUT` for
+  on and `DELETE` for off; a second run writes nothing.
+- `drift` reports the same difference as `repo <name>: immutable_releases:
+  registry="true" live="false"`. A repository GitHub answers 404 for
+  (missing, or a token without admin read) is printed as not visible, not
+  counted as drift; a missing repository is already reported by the
+  repo-settings check.
+- An organization that enforces the setting on makes a declared `false`
+  impossible: the plan marks the line blocked and `apply` refuses the whole
+  plan before writing.
+- Refused at load on an archived repository, which GitHub does not write.
+- It needs administration rights on the repositories. The engine's App is
+  not asked for them: the reconciler runs on the operator's own `gh`
+  credentials, like the entitlement reconciler.
 
 **Workflow-only tags** are a row's `workflow_only_tags:` — relative tag
 names (`deploy/pulumi/v*`, rendered as `refs/tags/deploy/pulumi/v*`) that

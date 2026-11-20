@@ -15,9 +15,9 @@ what nobody declared.
 | `pkg/engine` | The Pulumi engine: org settings, owners, teams, repos, protection, rulesets, Actions permissions — import-first adoption of what already exists |
 | `pkg/preflight` | The guards that run BEFORE the engine: refuse replaces of irreplaceable resources, catch waivers that outlived their cause, refuse plans that empty teams, refuse a renamed row whose state was not re-keyed |
 | `pkg/staterename` | `Rekey`: the one state re-key a repository rename needs, a pure transform of an exported Pulumi state that refuses what it cannot be sure of |
-| `pkg/cli` | The operator command line as a package an estate wires instead of copies: `drift`, `entitlements apply`, `preflight`, `state rename-repo` |
+| `pkg/cli` | The operator command line as a package an estate wires instead of copies: `drift`, `entitlements apply`, `immutable-releases plan|apply`, `preflight`, `state rename-repo` |
 | `pkg/seccfg` | The code security configuration **attachment reconciler** (`Plan` / `Apply`) and the `github-structure security-configurations` command. REST, not Pulumi; it attaches and never detaches |
-| `pkg/app` | The GitHub App side: App JWT, the REST client, drift checks (variables, owners, repo settings, bypass surfaces), and resolving a ruleset's bypass App slugs against the org's live installations. It authenticates AS an App; it never creates, inventories or audits one |
+| `pkg/app` | The GitHub App side: App JWT, the REST client, drift checks (variables, owners, repo settings, bypass surfaces, immutable releases), the `immutable-releases` reconciler, and resolving a ruleset's bypass App slugs against the org's live installations. It authenticates AS an App; it never creates, inventories or audits one |
 
 Extracted from a production estate that manages two organizations with
 it; the docs keep the incidents that shaped each rule, because the rule
@@ -185,6 +185,45 @@ github-structure security-configurations apply --org example-org --registry cfg/
 file instead of a registry. `plan` is read-only and exits non-zero only on
 errors; `apply` refuses without `--confirm`. The library functions are the
 same ones, for a pipeline that already holds an App client.
+
+## Immutable releases
+
+A repository's immutable-releases setting (a published release's tag and
+assets can no longer be changed) is declared per repository and reconciled
+over REST, **not** by the Pulumi engine:
+
+```yaml
+orgs:
+  example-org:
+    repos:
+      example-repo:
+        preset: public
+        immutable_releases: true     # true | false; leave it out to not manage it
+```
+
+- **Unset means not managed.** A row without the field is never read,
+  compared or written. `false` is a decision, and is applied: the setting
+  is switched off where it is on.
+- **Why not a Pulumi resource.** pulumi-github has no resource for it, and
+  the Go SDK has no dynamic provider to write one with. The setting is
+  `PUT` / `DELETE /repos/{owner}/{repo}/immutable-releases`, read with
+  `GET`, so it follows the pattern the engine already uses for a setting
+  outside the provider: a read-only plan, an idempotent apply, and a drift
+  check that reads the same plan (`pkg/app/immutable.go`).
+- **Preview.** `immutable-releases plan` reads GitHub and prints one line
+  per repository that would change (`repo example-repo: immutable_releases:
+  off -> on`); it writes nothing. `immutable-releases apply` switches the
+  repositories that differ and nothing else, so it is safe on every deploy.
+- **Drift.** `drift` reports a repository whose live value differs from its
+  row, like every other drift line. A repository GitHub will not let the
+  token read (a missing one, or a token without admin read) is printed as
+  not visible and not counted.
+- **Enforced by the organization.** If the organization enforces the
+  setting on, a row that says `false` cannot be applied: the plan marks it
+  blocked, and `apply` refuses before writing anything.
+- **Token.** The ambient `gh` credentials, like the other `pkg/app`
+  commands. Reading and writing the setting needs administration rights on
+  the repository.
 
 A company that holds only the boundary file the provider exported (the
 `boundary` command prints it) checks its own fragment with no registry,

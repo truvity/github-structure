@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -168,6 +169,9 @@ func checkRulesetActors(
 	wantDismiss := map[string]bool{}
 	// Whether each such ruleset requires a code owner's approval.
 	wantCodeOwner := map[string]bool{}
+	// The acts each declared tag ruleset restricts (creation, update,
+	// deletion), so a rule narrowed or widened by hand is reported.
+	wantTagRules := map[string][]string{}
 
 	for _, rs := range repo.TagRulesets {
 		// The registry names its bypass Apps; GitHub reports database
@@ -180,6 +184,7 @@ func checkRulesetActors(
 		}
 
 		wantActors[rs.Name] = declaredTagActors(ctx, org, rs, appIDs, teamIDs)
+		wantTagRules[rs.Name] = rs.EffectiveRules()
 	}
 
 	// workflow-only-tags is declared by the field, not by a row: its
@@ -257,6 +262,10 @@ func checkRulesetActors(
 		}
 
 		drifts = append(drifts, compareLiveBypass("repo "+name+" ruleset "+rs.Name, want, detail)...)
+
+		if wantRules, isTag := wantTagRules[rs.Name]; isTag {
+			drifts = append(drifts, compareLiveTagRules("repo "+name+" ruleset "+rs.Name, wantRules, detail)...)
+		}
 
 		if n, stated := wantApprovals[rs.Name]; stated {
 			live, liveDismiss, liveCodeOwner := detail.pullRequestRule()
@@ -424,6 +433,27 @@ func compareLiveBypass(subject string, want []string, detail liveRulesetDetail) 
 	}
 
 	return compareBypassSets(subject, "bypass actors", want, got)
+}
+
+// compareLiveTagRules compares the acts a tag ruleset restricts with the
+// declared ones. Only the three a `rules:` list can name are compared, so
+// a rule the registry has no word for does not read as a difference here.
+// GitHub leaves the rules out, rather than sending an empty list, when
+// the token may not read them: that is "not visible", never "none".
+func compareLiveTagRules(subject string, want []string, detail liveRulesetDetail) []Drift {
+	if detail.Rules == nil {
+		return []Drift{{Subject: subject, Field: "rules", NotVisible: true}}
+	}
+
+	var got []string
+
+	for _, rule := range detail.Rules {
+		if slices.Contains(registry.TagRuleRules, rule.Type) {
+			got = append(got, rule.Type)
+		}
+	}
+
+	return compareBypassSets(subject, "rules", want, got)
 }
 
 // compareBypassSets reports the symmetric difference of two actor sets
