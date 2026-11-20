@@ -51,8 +51,9 @@ const (
 	// gated by its required checks alone, and an automated pull request
 	// completes on green through GitHub's own auto-merge. The one
 	// exception is a hand-written branch ruleset that requires approvals
-	// AND names bypass_apps: an App that direct-pushes the default branch
-	// needs a bypass, which the `required` gate does not carry.
+	// AND says what the `required` gate cannot: bypass_apps (an App that
+	// direct-pushes the default branch), bypass_teams (a team that merges
+	// its own pull requests) or require_code_owner_review.
 	ReviewNone = "none"
 	// ReviewRequired asks for one approving review — from a human or
 	// from an App with pull_requests: write, both of which GitHub counts
@@ -1785,13 +1786,17 @@ func (c *Config) validateReview(login, name string, repo *Repo, resolved Resolve
 		}
 
 		// Under `review: none` a hand-written approval gate is allowed for
-		// the one thing `review: required` cannot say: an App that writes
-		// the default branch by direct push (gitops' Kargo promotion App)
-		// and so has no pull request to approve. Without such an App the
-		// row should say `review: required` instead.
-		if rs.RequiredApprovals > 0 && len(rs.BypassApps) == 0 {
-			return fmt.Errorf("org %q repo %q: branch ruleset %q requires approvals with no bypass_apps under review %q —"+
-				" use `review: %s`; a hand-written approval gate exists only for an App that direct-pushes",
+		// what `review: required` cannot say: an App that writes the
+		// default branch by direct push (gitops' Kargo promotion App)
+		// and so has no pull request to approve; a team that merges
+		// its own pull requests past the gate, in place of the
+		// organization admins `required` exempts; or a code owner's
+		// review. A gate that says none of these is `review: required`.
+		if rs.RequiredApprovals > 0 && !rs.saysWhatReviewCannot() {
+			return fmt.Errorf("org %q repo %q: branch ruleset %q requires approvals with no bypass_apps,"+
+				" bypass_teams or require_code_owner_review under review %q —"+
+				" use `review: %s`; a hand-written approval gate exists for what it cannot say:"+
+				" an App that direct-pushes, a bypass team, a code owner's review",
 				login, name, rs.Name, resolved.Review, ReviewRequired)
 		}
 
@@ -1985,6 +1990,14 @@ var validMergeMethods = map[string]bool{"merge": true, "squash": true, "rebase":
 // rule: approvals ask for it, or the row says so with no approvals.
 func (rs *BranchRuleset) requiresPullRequest() bool {
 	return rs.RequiredApprovals > 0 || rs.RequirePullRequest
+}
+
+// saysWhatReviewCannot reports whether an approval ruleset carries
+// something the `review: required` gate has no spelling for: a bypass
+// App, a bypass team (the gate's only bypass is the organization admins)
+// or a code owner's review.
+func (rs *BranchRuleset) saysWhatReviewCannot() bool {
+	return len(rs.BypassApps) > 0 || len(rs.BypassTeams) > 0 || rs.RequireCodeOwnerReview
 }
 
 // hasBypass reports whether the ruleset names any bypass actor.

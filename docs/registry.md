@@ -356,11 +356,33 @@ Sharp edges, all enforced by the loader:
   the value comes from the preset and the number from an override, which
   would otherwise drop an approval requirement silently.
 - The one exception: under `review: none`, a hand-written
-  `branch_rulesets` row may require approvals when it names
-  `bypass_apps`. That is the shape for a default branch that an App
-  writes by direct push (gitops' Kargo promotion App): there is no pull
-  request to approve, and the `required` gate carries no App bypass.
-  Without `bypass_apps` the row must say `review: required` instead.
+  `branch_rulesets` row may require approvals when it says something the
+  `required` gate has no spelling for, by naming at least one of
+  `bypass_apps`, `bypass_teams` or `require_code_owner_review`:
+  - `bypass_apps` is the shape for a default branch that an App writes
+    by direct push (gitops' Kargo promotion App): there is no pull
+    request to approve, and the `required` gate carries no App bypass.
+  - `bypass_teams` is a team, instead of the organization admins, that
+    merges its own pull requests past the gate (bypass mode
+    `pull_request`; a direct push stays refused for it).
+  - `require_code_owner_review: true` adds the CODEOWNERS approval,
+    which the `required` gate does not carry.
+
+  A row that names none of the three must say `review: required`
+  instead. A full default-branch gate with no App, for example:
+
+  ```yaml
+  review: none
+  branch_rulesets:
+    - name: default-branch
+      pattern: ~DEFAULT_BRANCH
+      required_approvals: 1
+      dismiss_stale_reviews_on_push: true
+      require_code_owner_review: true
+      block_deletion: true
+      block_force_push: true
+      bypass_teams: [maintainers]
+  ```
 - It lives on the repository ROW, never in `overrides:`.
 - `review_dismiss_stale: true` (row, or profile with the row winning)
   adds `dismiss_stale_reviews_on_push` to the rendered ruleset: pushing

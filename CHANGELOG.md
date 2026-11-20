@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.30.0
+
+### Changed
+
+- **`review: none` accepts a hand-written approval ruleset that names `bypass_teams` or `require_code_owner_review`, not only `bypass_apps`.** The loader refused an approval ruleset (`required_approvals > 0`) beside `review: none` unless it named a bypass App, on the reasoning that anything else is `review: required`. Two things `required` cannot say were therefore unwritable without an App: a code owner's review, and a team, not the organization admins, that merges its own pull requests past the gate. The row now loads when it names at least one of `bypass_apps`, `bypass_teams` or `require_code_owner_review`, and is refused, with the three named, when it names none. Nothing else changes: `bypass_teams` already rendered as a `Team` actor in bypass mode `pull_request` (a direct push stays refused for the team), `require_code_owner_review` as the `pull_request` rule's flag, and `github-drift` already compared both. A row beside `review: required` is refused as before. Every registry that loaded before renders and plans exactly as before; the change only admits rows that were errors.
+
 ## v0.29.0
 
 ### Added

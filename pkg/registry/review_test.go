@@ -323,3 +323,92 @@ func TestBranchRulesetDismissStaleReviewsOnPushLoads(t *testing.T) {
 	require.Len(t, rs, 1)
 	assert.True(t, rs[0].DismissStaleReviewsOnPush)
 }
+
+// Under `review: none` an approval ruleset is also accepted when it names
+// what the `required` gate cannot say without an App: a bypass team, or a
+// code owner's review. A default-branch gate: one approval, a code
+// owner, no direct push, force push or deletion, and a team that merges
+// its own pull requests, with no App and no organization-admin bypass.
+func TestReviewNoneAcceptsApprovalRulesetWithTeamAndCodeOwner(t *testing.T) {
+	row := func(rs string) string {
+		return strings.Replace(minimal, "        preset: public\n", `        preset: public
+        review: none
+        branch_rulesets:
+          - name: default-branch
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 1
+`+rs, 1)
+	}
+
+	full := row(`            dismiss_stale_reviews_on_push: true
+            require_code_owner_review: true
+            block_deletion: true
+            block_force_push: true
+            bypass_teams: [engineers]
+`)
+
+	c, err := load(t, full)
+	require.NoError(t, err)
+
+	rs := c.Orgs["acme"].Repos["widget"].BranchRulesets[0]
+	assert.True(t, rs.RequireCodeOwnerReview)
+	assert.Equal(t, []string{"engineers"}, rs.BypassTeams)
+	assert.Empty(t, rs.BypassApps)
+	assert.False(t, rs.BypassOrgAdmins)
+
+	// Each of the two is enough alone.
+	_, err = load(t, row("            bypass_teams: [engineers]\n"))
+	require.NoError(t, err)
+
+	_, err = load(t, row("            require_code_owner_review: true\n            no_bypass: true\n"))
+	require.NoError(t, err)
+
+	// The organization-admin bypass is what `review: required` already
+	// says, so it does not justify a hand-written gate.
+	_, err = load(t, row("            bypass_org_admins: true\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no bypass_apps, bypass_teams or require_code_owner_review")
+}
+
+// The new spellings change nothing beside `review: required`: the gate
+// is still rendered by the field, and a second approval ruleset is still
+// two declarations of one gate.
+func TestReviewRequiredStillRefusesApprovalRulesetWithTeamAndCodeOwner(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        review: required
+        branch_rulesets:
+          - name: default-branch
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 1
+            require_code_owner_review: true
+            bypass_teams: [engineers]
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "both require approvals")
+}
+
+// A bypass team the org does not declare stays a load error under
+// `review: none`, and an approval ruleset may not take the name the
+// `review` field renders.
+func TestReviewNoneApprovalRulesetKeepsTeamAndNameChecks(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        review: none
+        branch_rulesets:
+          - name: default-branch
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 1
+            bypass_teams: [ghosts]
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `bypass team "ghosts" is not in this org's teams`)
+
+	clash := strings.Replace(strings.Replace(body, "[ghosts]", "[engineers]", 1), "name: default-branch", "name: pr-approval", 1)
+
+	_, err = load(t, clash)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "collides")
+}
