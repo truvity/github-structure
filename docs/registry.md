@@ -100,6 +100,8 @@ orgs:
         workflow_only_tags:       # tags only the repo's own release
           - deploy/pulumi/v*      # workflow may write (see below)
         branch_rulesets: [...]
+        variables:                # the repo's own Actions variables:
+          RELEASE_ROLE_ARN: arn:...:role/<name>       # NAME: plain value (see below)
         environments:             # deployment environments (see below)
           production:
             branches: [main]
@@ -398,6 +400,49 @@ orgs:
       "no workflow here reports `check` yet": [alpha, beta, gamma]
       "the workflows here deploy; none reports `check`": [delta]
 ```
+
+**Variables** are a row's `variables:`, a map from the name of an Actions
+variable of the repository to its plain value:
+
+```yaml
+      landing:
+        preset: private
+        variables:
+          RELEASE_ROLE_ARN: arn:<partition>:iam::<account>:role/release-landing
+          DEPLOY_REGION: eu-central-1
+```
+
+The engine renders one `github.ActionsVariable` per entry, so a new
+repository needs no `gh variable set`. The organization's variables are a
+different thing (`settings.actions.variables`, above).
+
+- **Import, never recreate.** A variable that is live (set by hand, or by an
+  earlier run) is imported (`repo:NAME`); anything else is created. Without
+  the import the create fails with a conflict. A changed value is an
+  in-place update. Reading the live variables needs the engine App's
+  repository permission **Variables: read and write**; without it the run
+  stops and says so, and a repository that declares no variables never asks.
+- **Dropping a variable from the row deletes it** (unlike an environment,
+  which is retained: a variable holds nothing but the value the row still
+  has). A variable the row does not name is left alone: the engine adds and
+  adopts, it does not enumerate.
+- **Names** are letters, digits and underscore, not starting with a digit
+  and not `GITHUB_`; GitHub keeps them in upper case, so the engine declares
+  them so, and two names that differ only by case are refused. A value is
+  not empty and at most 48 KB.
+- **Plain, not secret.** A variable is clear text for everyone who can read
+  the repository, and the registry is a file in git. A name containing
+  `SECRET`, `TOKEN`, `PASSWORD` or `KEY` (any case) is refused, because it
+  promises a secret. The one exception is a value that is an ARN
+  (`arn:...`): an ARN names a thing and does not open it, so
+  `RELEASE_ROLE_ARN` or `AWS_KMS_KEY_ARN` may hold one. The rule is blunt on
+  purpose; a value that really is a secret belongs in a secret, which this
+  registry does not manage.
+- The state re-key moves the resources with a renamed repository. The drift
+  check does not compare variables: one changed by hand shows up in the next
+  preview, not in `drift`.
+- Refused at load: a name or value that breaks the rules above; any
+  variable on an archived repository.
 
 **Team defaults** fill `privacy` and `notifications` where a team's row
 leaves them unsaid; a row that writes the field keeps what it wrote.

@@ -475,3 +475,38 @@ func pendingOn(t *testing.T, raw []byte, name string) []byte {
 
 	return nil
 }
+
+// A repository's Actions variables move with it: the resource name carries
+// the repository, and the id ("repo:NAME") is the repository's too.
+func TestRekeyMovesVariables(t *testing.T) {
+	doc := strings.Replace(registryDoc(newName), "        preset: public\n        access: [managers]\n        teams:",
+		"        preset: public\n        access: [managers]\n        variables:\n"+
+			"          RELEASE_ROLE_ARN: arn:test:iam::1234:role/release-gadget\n        teams:", 1)
+	cfg, err := registry.Load(fstest.MapFS{"github.yaml": {Data: []byte(doc)}})
+	require.NoError(t, err)
+
+	root, byName := decode(t, fixture(t, "state-widget.json"))
+
+	variable := map[string]any{}
+	for k, v := range byName["actions-"+oldName] {
+		variable[k] = v
+	}
+
+	variable["urn"] = strings.Replace(variable["urn"].(string), "actions-"+oldName, "variable-"+oldName+"-RELEASE_ROLE_ARN", 1)
+	variable["type"] = "github:index/actionsVariable:ActionsVariable"
+	variable["id"] = oldName + ":RELEASE_ROLE_ARN"
+	variable["importID"] = oldName + ":RELEASE_ROLE_ARN"
+
+	dep := root["deployment"].(map[string]any)
+	dep["resources"] = append(dep["resources"].([]any), variable)
+
+	state, err := json.Marshal(root)
+	require.NoError(t, err)
+
+	out, _ := mustRekey(t, state, cfg, oldName, newName)
+	_, moved := decode(t, out)
+
+	require.Contains(t, moved, "variable-"+newName+"-RELEASE_ROLE_ARN")
+	assert.NotContains(t, moved, "variable-"+oldName+"-RELEASE_ROLE_ARN")
+	assert.Equal(t, newName+":RELEASE_ROLE_ARN", moved["variable-"+newName+"-RELEASE_ROLE_ARN"]["id"])
+}

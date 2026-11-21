@@ -482,6 +482,17 @@ type (
 		// alone, so retiring one is a manual deletion after its last
 		// workflow has moved. See Environment.
 		Environments map[string]Environment `yaml:"environments,omitempty"`
+		// Variables are the repository's own Actions variables, by name
+		// (`RELEASE_ROLE_ARN`), with their plain values. The engine
+		// declares one github.ActionsVariable each: a variable that is
+		// live is imported, one that is not is created, a changed value
+		// is an in-place update, and one dropped from the row is
+		// deleted. A variable the row does not name is left alone.
+		//
+		// Values are plain text: names that read as a secret (SECRET,
+		// TOKEN, PASSWORD, KEY) are refused unless the value is an AWS
+		// ARN. Organization-level variables are Settings.Actions.Variables.
+		Variables map[string]string `yaml:"variables,omitempty"`
 		// BranchRulesets are repository rulesets targeting branches —
 		// today expressing exactly one shape: a pull-request approval
 		// requirement that named GitHub Apps may bypass. This exists
@@ -1717,6 +1728,10 @@ func (c *Config) validateRepos(login string, org *Org) error {
 			return err
 		}
 
+		if err := validateVariables(login, name, repo); err != nil {
+			return err
+		}
+
 		// An archived repo declares nothing but the repository itself,
 		// so anything that only shapes the resources it no longer has is
 		// inert. Silently-inert config is how a row comes to mean
@@ -1761,6 +1776,11 @@ func (c *Config) validateRepos(login string, org *Org) error {
 			if len(repo.Environments) > 0 {
 				return fmt.Errorf("org %q repo %q: archived, so environments do nothing — an archived"+
 					" repository is read-only and runs no deployment. Delete them, or unarchive", login, name)
+			}
+
+			if len(repo.Variables) > 0 {
+				return fmt.Errorf("org %q repo %q: archived, so variables do nothing — an archived"+
+					" repository is read-only and runs no workflow. Delete them, or unarchive", login, name)
 			}
 
 			// Protection below is resolved from the profile and never

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	app "github.com/truvity/github-structure/pkg/app"
 	registry "github.com/truvity/github-structure/pkg/registry"
@@ -42,6 +43,10 @@ type liveState struct { //nolint:grouper // one type in this file; a group of on
 	// deployment policies, by "branch:<pattern>" or "tag:<pattern>", to the
 	// policy's numeric id, which is part of its import id.
 	envPolicies map[string]map[string]string
+	// variables maps a repository to the set of its Actions variables that
+	// already exist, read only for a repository whose row declares some. A
+	// variable is imported ONLY when it is live.
+	variables map[string]map[string]bool
 	// billingEmail is the org's CURRENT billing address. Billing is the
 	// IT team's, managed in the UI — but the provider's settings
 	// resource requires the field, so the engine passes the live value
@@ -87,6 +92,7 @@ func readLiveState(
 
 		environments: make(map[string]map[string]bool),
 		envPolicies:  make(map[string]map[string]string),
+		variables:    make(map[string]map[string]bool),
 	}
 
 	if err := state.readTeams(ctx, client, org); err != nil {
@@ -133,6 +139,10 @@ func readLiveState(
 	}
 
 	if err := state.readEnvironments(ctx, client, org, orgCfg); err != nil {
+		return nil, err
+	}
+
+	if err := state.readVariables(ctx, client, org, orgCfg); err != nil {
 		return nil, err
 	}
 
@@ -213,6 +223,63 @@ func (s *liveState) readEnvironments(ctx context.Context, client getter, org str
 	}
 
 	return nil
+}
+
+// variablesPageSize is the page size GitHub allows at most for the list of a
+// repository's Actions variables.
+const variablesPageSize = 30
+
+// readVariables reads, for each EXISTING repository that declares Actions
+// variables, which variables it already has, so a variable is imported when
+// it is live and created when it is not. The values are not kept: the
+// resource's own refresh reads them, and a value that differs is an update.
+//
+// An unreadable answer stops the run: the engine App needs the repository
+// permission "Variables" (read and write), and without it GitHub answers 403
+// or 404. Reading that as "no variables" would plan creates for variables that
+// exist and fail at apply with a conflict.
+func (s *liveState) readVariables(ctx context.Context, client getter, org string, orgCfg *registry.Org) error {
+	for _, name := range orgCfg.SortedRepos() {
+		repo := orgCfg.Repos[name]
+		if repo == nil || repo.Archived || len(repo.Variables) == 0 || !s.repos[name] {
+			continue
+		}
+
+		live := map[string]bool{}
+
+		for page := 1; ; page++ {
+			var list struct {
+				TotalCount int `json:"total_count"`
+				Variables  []struct {
+					Name string `json:"name"`
+				} `json:"variables"`
+			}
+
+			path := fmt.Sprintf("/repos/%s/%s/actions/variables?per_page=%d&page=%d", org, name, variablesPageSize, page)
+			if err := client.Get(ctx, path, &list); err != nil {
+				return fmt.Errorf("list Actions variables of repo %s: %w (the engine App needs the repository permission"+
+					" \"Variables\": read and write)", name, err)
+			}
+
+			for _, v := range list.Variables {
+				live[v.Name] = true
+			}
+
+			if len(list.Variables) < variablesPageSize || len(live) >= list.TotalCount {
+				break
+			}
+		}
+
+		s.variables[name] = live
+	}
+
+	return nil
+}
+
+// variableExists reports whether a repository's Actions variable is live.
+// GitHub keeps variable names in upper case, whatever case was written.
+func (s *liveState) variableExists(repo, name string) bool {
+	return s.variables[repo][strings.ToUpper(name)]
 }
 
 // environmentExists reports whether a repository's environment is live.
