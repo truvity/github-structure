@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.32.0
+
+### Added
+
+- **A repository row's `variables:` declares its Actions variables, rendered as `github.ActionsVariable`.** A map from the variable's name (`RELEASE_ROLE_ARN`) to its plain value; the engine declares one resource per entry, so a repository's variables are code and a new repository needs no `gh variable set`. **Import, never recreate:** a variable that is live is imported (`repo:NAME`), anything else is created, and a changed value is an in-place update. Live variables are read once per repository that declares some (`GET /repos/{owner}/{repo}/actions/variables`, paged), and an unreadable answer stops the run and names the permission. **Dropping an entry deletes the variable** (an environment is retained, a variable holds only the value the row still has); a variable the row does not name is left alone. **Values are plain, not secret:** the loader refuses a name containing `SECRET`, `TOKEN`, `PASSWORD` or `KEY` (any case) unless the value is an ARN, which names a thing and does not open it (`RELEASE_ROLE_ARN`, `AWS_KMS_KEY_ARN`). It also refuses a name GitHub refuses (characters other than letters, digits and underscore, a leading digit, the `GITHUB_` prefix), two names that differ only by case, an empty value, one over 48 KB, and any variable on an archived repository. The names are declared in upper case, as GitHub keeps them. The state re-key moves `variable-<repo>-<NAME>` with a renamed repository. The drift check does not compare variables. **Adoption:** nothing to change unless a row declares `variables`. A row that does needs the engine App's repository permission **Variables: read and write**; the run stops and names it when it is missing, and a repository that declares none never asks.
+
 ## v0.31.0
 
 ### Added

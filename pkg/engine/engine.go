@@ -561,6 +561,10 @@ func deployRepos(
 			if err := deployEnvironments(c, name, repo, orgCfg.Repos[name], teams, live, provider); err != nil {
 				return fmt.Errorf("repo %s environments: %w", name, err)
 			}
+
+			if err := deployVariables(c, name, repo, orgCfg.Repos[name], live, provider); err != nil {
+				return fmt.Errorf("repo %s variables: %w", name, err)
+			}
 		}
 
 		if err := deployTeamGrants(c, name, resolved, teams, live, provider); err != nil {
@@ -901,6 +905,60 @@ func deployEnvironments(
 	}
 
 	return nil
+}
+
+// deployVariables declares a repository's own Actions variables, one
+// ActionsVariable each.
+//
+// Check-then-import, like the environments: a variable that is live is
+// imported by "repo:NAME", which is also the id the resource gets when it is
+// created, so the next run's import names the id already in state and is a
+// no-op. Without the import a variable set by hand (`gh variable set`) would
+// make the create fail with a conflict.
+//
+// Unlike an environment a variable is NOT retained on delete: it holds
+// nothing but its value, which the row still has in git, so dropping it from
+// the row deletes it. A variable the row does not name is left alone: the
+// engine adds and adopts, it does not enumerate.
+//
+// GitHub keeps variable names in upper case, so the name is declared in upper
+// case: the import id and the resource then spell it as GitHub does.
+func deployVariables(
+	c *pulumi.Context,
+	repoName string,
+	repo *github.Repository,
+	row *registry.Repo,
+	live *liveState,
+	provider *github.Provider,
+) error {
+	if row == nil {
+		return nil
+	}
+
+	for _, varName := range row.SortedVariables() {
+		upper := strings.ToUpper(varName)
+		opts := []pulumi.ResourceOption{pulumi.Provider(provider)}
+
+		if live.variableExists(repoName, varName) {
+			opts = append(opts, pulumi.Import(pulumi.ID(repoName+":"+upper)))
+		}
+
+		if _, err := github.NewActionsVariable(c, variableResourceName(repoName, varName), &github.ActionsVariableArgs{
+			Repository:   repo.Name,
+			VariableName: pulumi.String(upper),
+			Value:        pulumi.String(row.Variables[varName]),
+		}, opts...); err != nil {
+			return fmt.Errorf("variable %s: %w", varName, err)
+		}
+	}
+
+	return nil
+}
+
+// variableResourceName is the engine's resource name of a repository's
+// variable; the state re-key spells it the same way.
+func variableResourceName(repoName, varName string) string {
+	return "variable-" + repoName + "-" + strings.ToUpper(varName)
 }
 
 // deployEnvironmentPolicies declares an environment's deployment policies,

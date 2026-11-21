@@ -2,6 +2,7 @@ package staterename
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/truvity/github-structure/pkg/registry"
 )
@@ -18,6 +19,7 @@ const (
 	prefixGrant        = "grant-"
 	prefixEnvironment  = "environment-"
 	prefixEnvPolicy    = "environment-policy-"
+	prefixVariable     = "variable-"
 )
 
 // ResourceNames are the engine resource names of the row repo in org: the
@@ -95,6 +97,10 @@ func namesFor(cfg *registry.Config, org, row, as string) (required, optional []s
 			for _, p := range r.Environments[env].Tags {
 				add(&required, prefixEnvPolicy+as+"-"+env+"-tag-"+p)
 			}
+		}
+
+		for _, v := range r.SortedVariables() {
+			add(&required, prefixVariable+as+"-"+strings.ToUpper(v))
 		}
 	}
 

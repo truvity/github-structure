@@ -427,6 +427,10 @@ func (rn *renamer) rename(name string) (string, bool) {
 		return prefixEnvironment + rn.to + "-" + rest, true
 	}
 
+	if rest, ok := strings.CutPrefix(name, prefixVariable+rn.from+"-"); ok {
+		return prefixVariable + rn.to + "-" + rest, true
+	}
+
 	for _, slug := range rn.teams {
 		if name == prefixGrant+slug+"-"+rn.from {
 			return prefixGrant + slug + "-" + rn.to, true
