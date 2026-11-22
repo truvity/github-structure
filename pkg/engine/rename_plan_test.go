@@ -168,7 +168,9 @@ func (h *harness) program(reg *registry.Config, orgCfg *registry.Org, live *live
 			return err
 		}
 
-		return deployRepos(c, renameOrg, reg, orgCfg, teams, live, provider)
+		_, err = deployRepos(c, renameOrg, reg, orgCfg, teams, live, provider)
+
+		return err
 	}
 }
 

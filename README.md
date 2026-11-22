@@ -84,6 +84,11 @@ err = engine.Deploy(ctx, logger, "my-org", reg, engine.Credentials{
 })
 ```
 
+`engine.DeployWithResult` takes the same arguments and also returns what the
+run declared: `Result.RepoIDs` maps each repository's name to its
+`RepoId` output, so a stack can export a repository's numeric id in the
+run that creates it.
+
 One stack per organization. The registry is shared: a second org is a new
 `orgs:` key referencing the same profiles — never new code.
 

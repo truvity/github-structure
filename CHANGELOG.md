@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.33.0
+
+### Added
+
+- **`engine.DeployWithResult` returns each declared repository's numeric id.** It takes `Deploy`'s arguments and returns an `engine.Result` whose `RepoIDs` maps a repository's name to the `RepoId` output of the `github.Repository` the run declared, one entry per row, archived rows included. A stack that exports repository ids (for an OIDC subject that names the repository id, say) can take them from the resource: a repository created in this run has its id in this run, where reading the API from the program finds it only on the next run. `Deploy` is unchanged and now wraps `DeployWithResult`. **Adoption:** nothing to change; a caller that wants the ids switches to `DeployWithResult`.
+
 ## v0.32.0
 
 ### Added

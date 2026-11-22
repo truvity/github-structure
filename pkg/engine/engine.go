@@ -85,12 +85,33 @@ const (
 // engine App's credentials (wherever the estate keeps them — SSM, SOPS,
 // a secret manager). The engine is the MECHANISM and holds no opinion on
 // any of the three.
+//
+// Deploy is DeployWithResult without the result.
 func Deploy(c *pulumi.Context, logger *slog.Logger, org string, reg *registry.Config, creds Credentials) error {
+	_, err := DeployWithResult(c, logger, org, reg, creds)
+
+	return err
+}
+
+// Result is what a run declared that a caller may build on.
+type Result struct {
+	// RepoIDs is each declared repository's numeric id, keyed by
+	// repository name: the RepoId output of the github.Repository the run
+	// declared. A repository this run creates has its id once the
+	// resource is created, in the same run, which a read of the API
+	// before or during the program cannot give. Archived rows are
+	// included; their repository is declared like any other.
+	RepoIDs map[string]pulumi.IntOutput
+}
+
+// DeployWithResult declares the same structure as Deploy and returns what
+// was declared (see Result).
+func DeployWithResult(c *pulumi.Context, logger *slog.Logger, org string, reg *registry.Config, creds Credentials) (Result, error) {
 	logger = logger.With(slog.String("org", org))
 
 	orgCfg, ok := reg.Orgs[org]
 	if !ok {
-		return fmt.Errorf("org %q not in the registry (known: %v)", org, reg.SortedOrgs())
+		return Result{}, fmt.Errorf("org %q not in the registry (known: %v)", org, reg.SortedOrgs())
 	}
 
 	provider, err := github.NewProvider(c, "github-"+org, &github.ProviderArgs{
@@ -105,38 +126,39 @@ func Deploy(c *pulumi.Context, logger *slog.Logger, org string, reg *registry.Co
 		ParallelRequests: pulumi.Bool(false),
 	})
 	if err != nil {
-		return fmt.Errorf("create github provider: %w", err)
+		return Result{}, fmt.Errorf("create github provider: %w", err)
 	}
 
 	client, err := creds.Client(c.Context())
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 
 	live, err := readLiveState(c.Context(), client, org, orgCfg)
 	if err != nil {
-		return fmt.Errorf("read live state: %w", err)
+		return Result{}, fmt.Errorf("read live state: %w", err)
 	}
 
 	if err := deployOrgSettings(c, org, orgCfg, live, provider); err != nil {
-		return fmt.Errorf("org settings: %w", err)
+		return Result{}, fmt.Errorf("org settings: %w", err)
 	}
 
 	if err := deployOrgActions(c, org, orgCfg, provider); err != nil {
-		return fmt.Errorf("org actions: %w", err)
+		return Result{}, fmt.Errorf("org actions: %w", err)
 	}
 
 	if err := deployOwners(c, org, orgCfg, provider); err != nil {
-		return fmt.Errorf("org owners: %w", err)
+		return Result{}, fmt.Errorf("org owners: %w", err)
 	}
 
 	teams, err := deployTeams(c, client, org, orgCfg, live, provider)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 
-	if err := deployRepos(c, org, reg, orgCfg, teams, live, provider); err != nil {
-		return err
+	repoIDs, err := deployRepos(c, org, reg, orgCfg, teams, live, provider)
+	if err != nil {
+		return Result{}, err
 	}
 
 	logger.InfoContext(c.Context(), "github structure declared",
@@ -144,7 +166,7 @@ func Deploy(c *pulumi.Context, logger *slog.Logger, org string, reg *registry.Co
 		slog.Int("repos", len(orgCfg.Repos)),
 	)
 
-	return nil
+	return Result{RepoIDs: repoIDs}, nil
 }
 
 type (
@@ -514,14 +536,18 @@ func deployRepos(
 	teams map[string]*github.Team,
 	live *liveState,
 	provider *github.Provider,
-) error {
+) (map[string]pulumi.IntOutput, error) {
+	ids := make(map[string]pulumi.IntOutput, len(orgCfg.Repos))
+
 	for _, name := range orgCfg.SortedRepos() {
 		resolved := reg.Resolve(orgCfg.Repos[name])
 
 		repo, err := deployRepo(c, name, resolved, live, provider)
 		if err != nil {
-			return fmt.Errorf("repo %s: %w", name, err)
+			return nil, fmt.Errorf("repo %s: %w", name, err)
 		}
+
+		ids[name] = repo.RepoId
 
 		// An archived repository is read-only: GitHub answers 403 to
 		// writes on its Actions permissions, workflow permissions and
@@ -535,46 +561,46 @@ func deployRepos(
 		// can read a retired repo is still a decision worth owning.
 		if !resolved.Archived {
 			if err := deployRepoActions(c, name, resolved, repo, live, provider); err != nil {
-				return fmt.Errorf("repo %s actions: %w", name, err)
+				return nil, fmt.Errorf("repo %s actions: %w", name, err)
 			}
 
 			if err := deployProtection(c, name, resolved, repo, provider); err != nil {
-				return fmt.Errorf("repo %s protection: %w", name, err)
+				return nil, fmt.Errorf("repo %s protection: %w", name, err)
 			}
 
 			if err := deployTagRulesets(c, name, live.installedApps, orgCfg.Repos[name].TagRulesets, teams, provider); err != nil {
-				return fmt.Errorf("repo %s tag rulesets: %w", name, err)
+				return nil, fmt.Errorf("repo %s tag rulesets: %w", name, err)
 			}
 
 			if err := deployWorkflowOnlyTags(c, name, orgCfg.Repos[name].WorkflowOnlyTags, provider); err != nil {
-				return fmt.Errorf("repo %s workflow-only tags: %w", name, err)
+				return nil, fmt.Errorf("repo %s workflow-only tags: %w", name, err)
 			}
 
 			if err := deployBranchRulesets(c, name, live.installedApps, orgCfg.Repos[name].BranchRulesets, teams, provider); err != nil {
-				return fmt.Errorf("repo %s branch rulesets: %w", name, err)
+				return nil, fmt.Errorf("repo %s branch rulesets: %w", name, err)
 			}
 
 			if err := deployReviewGate(c, name, live.installedApps, resolved, provider); err != nil {
-				return fmt.Errorf("repo %s review gate: %w", name, err)
+				return nil, fmt.Errorf("repo %s review gate: %w", name, err)
 			}
 
 			if err := deployEnvironments(c, name, repo, orgCfg.Repos[name], teams, live, provider); err != nil {
-				return fmt.Errorf("repo %s environments: %w", name, err)
+				return nil, fmt.Errorf("repo %s environments: %w", name, err)
 			}
 
 			if err := deployVariables(c, name, repo, orgCfg.Repos[name], live, provider); err != nil {
-				return fmt.Errorf("repo %s variables: %w", name, err)
+				return nil, fmt.Errorf("repo %s variables: %w", name, err)
 			}
 		}
 
 		if err := deployTeamGrants(c, name, resolved, teams, live, provider); err != nil {
-			return fmt.Errorf("repo %s team grants: %w", name, err)
+			return nil, fmt.Errorf("repo %s team grants: %w", name, err)
 		}
 	}
 
 	_ = org
 
-	return nil
+	return ids, nil
 }
 
 // repoIgnoredFields returns the inputs this engine DECLARES but must not
