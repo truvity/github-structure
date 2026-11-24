@@ -47,6 +47,10 @@ type liveState struct { //nolint:grouper // one type in this file; a group of on
 	// already exist, read only for a repository whose row declares some. A
 	// variable is imported ONLY when it is live.
 	variables map[string]map[string]bool
+	// runnerGroups maps an Actions runner group's name to its numeric id,
+	// for the groups that already exist; read only when the org declares
+	// some. A runner group is imported ONLY when it is live.
+	runnerGroups map[string]int64
 	// billingEmail is the org's CURRENT billing address. Billing is the
 	// IT team's, managed in the UI — but the provider's settings
 	// resource requires the field, so the engine passes the live value
@@ -93,6 +97,7 @@ func readLiveState(
 		environments: make(map[string]map[string]bool),
 		envPolicies:  make(map[string]map[string]string),
 		variables:    make(map[string]map[string]bool),
+		runnerGroups: make(map[string]int64),
 	}
 
 	if err := state.readTeams(ctx, client, org); err != nil {
@@ -143,6 +148,10 @@ func readLiveState(
 	}
 
 	if err := state.readVariables(ctx, client, org, orgCfg); err != nil {
+		return nil, err
+	}
+
+	if err := state.readRunnerGroups(ctx, client, org, orgCfg); err != nil {
 		return nil, err
 	}
 

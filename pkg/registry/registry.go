@@ -98,6 +98,10 @@ const (
 	RunnerVisibilityAll      = "all"
 	RunnerVisibilitySelected = "selected"
 	RunnerVisibilityPrivate  = "private"
+
+	// runnerGroupDefault is the runner group GitHub makes with every
+	// organization; it is not the registry's to declare.
+	runnerGroupDefault = "Default"
 )
 
 var (
@@ -2238,6 +2242,10 @@ func (o *Org) validateRunnerGroups(login string) error {
 			return fmt.Errorf("org %q runner group %q: empty row", login, name)
 		}
 
+		if err := validateRunnerGroupName(login, name, group); err != nil {
+			return err
+		}
+
 		if !validRunnerVisibility[group.Visibility] {
 			return fmt.Errorf("org %q runner group %q: visibility %q must be all, selected or private", login, name, group.Visibility)
 		}
@@ -2255,6 +2263,34 @@ func (o *Org) validateRunnerGroups(login string) error {
 		if group.RestrictedToWorkflows && len(group.SelectedWorkflows) == 0 {
 			return fmt.Errorf("org %q runner group %q: restricted_to_workflows needs selected_workflows", login, name)
 		}
+
+		if !group.RestrictedToWorkflows && len(group.SelectedWorkflows) > 0 {
+			return fmt.Errorf("org %q runner group %q: selected_workflows needs restricted_to_workflows: true"+
+				" (without it GitHub ignores the list)", login, name)
+		}
+	}
+
+	return nil
+}
+
+// validateRunnerGroupName refuses a name the engine cannot own and a repo
+// listed twice.
+func validateRunnerGroupName(login, name string, group *RunnerGroup) error {
+	// GitHub makes the Default group with the organization and refuses to
+	// delete or rename it; a row for it would be a resource that can be
+	// imported but never created, and whose name a typo would change.
+	if strings.EqualFold(name, runnerGroupDefault) {
+		return fmt.Errorf("org %q runner group %q: the Default group is GitHub's own and is not declared", login, name)
+	}
+
+	seen := map[string]bool{}
+
+	for _, repo := range group.Repos {
+		if seen[repo] {
+			return fmt.Errorf("org %q runner group %q: repo %q is listed twice", login, name, repo)
+		}
+
+		seen[repo] = true
 	}
 
 	return nil
