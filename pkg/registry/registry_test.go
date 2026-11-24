@@ -948,6 +948,54 @@ func TestRunnerGroupRejectsUnknownRepo(t *testing.T) {
 	assert.Contains(t, err.Error(), "not an in-scope row")
 }
 
+func TestRunnerGroupRefusesTheDefaultGroup(t *testing.T) {
+	for _, name := range []string{"Default", "default"} {
+		_, err := load(t, minimal+`
+    runner_groups:
+      `+name+`:
+        visibility: all
+`)
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), "GitHub's own")
+	}
+}
+
+func TestRunnerGroupRefusesARepoListedTwice(t *testing.T) {
+	_, err := load(t, minimal+`
+    runner_groups:
+      arc:
+        visibility: selected
+        repos: [widget, widget]
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "listed twice")
+}
+
+func TestRunnerGroupRefusesWorkflowsWithoutTheRestriction(t *testing.T) {
+	_, err := load(t, minimal+`
+    runner_groups:
+      arc:
+        visibility: all
+        selected_workflows: [acme/widget/.github/workflows/release.yaml@refs/heads/master]
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "needs restricted_to_workflows")
+}
+
+// The stable tiers' groups as they are live (2026-11-24) load.
+func TestRunnerGroupAcceptsTheStableTierShapes(t *testing.T) {
+	c, err := load(t, minimal+`
+    runner_groups:
+      stable:
+        visibility: all
+      stable-pilot:
+        visibility: selected
+        repos: [widget]
+`)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"stable", "stable-pilot"}, c.Orgs["acme"].SortedRunnerGroups())
+}
+
 // ── the real registry ──────────────────────────────────────────────────
 
 // The committed cfg/github.yaml must always load. This is the test that

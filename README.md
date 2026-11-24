@@ -12,7 +12,7 @@ what nobody declared.
 | Package | What |
 | --- | --- |
 | `pkg/registry` | The registry schema: settings **profiles**, per-repo **overrides with reasons**, **waivers with exit conditions**; strict loading (unknown keys are errors) and validation |
-| `pkg/engine` | The Pulumi engine: org settings, owners, teams, repos, protection, rulesets, Actions permissions — import-first adoption of what already exists |
+| `pkg/engine` | The Pulumi engine: org settings, owners, teams, repos, protection, rulesets, Actions permissions, environments, variables, runner groups — import-first adoption of what already exists |
 | `pkg/preflight` | The guards that run BEFORE the engine: refuse replaces of irreplaceable resources, catch waivers that outlived their cause, refuse plans that empty teams, refuse a renamed row whose state was not re-keyed |
 | `pkg/staterename` | `Rekey`: the one state re-key a repository rename needs, a pure transform of an exported Pulumi state that refuses what it cannot be sure of |
 | `pkg/cli` | The operator command line as a package an estate wires instead of copies: `drift`, `entitlements apply`, `immutable-releases plan|apply`, `preflight`, `state rename-repo` |

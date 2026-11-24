@@ -161,6 +161,10 @@ func DeployWithResult(c *pulumi.Context, logger *slog.Logger, org string, reg *r
 		return Result{}, err
 	}
 
+	if err := deployRunnerGroups(c, orgCfg, repoIDs, live, provider); err != nil {
+		return Result{}, fmt.Errorf("runner groups: %w", err)
+	}
+
 	logger.InfoContext(c.Context(), "github structure declared",
 		slog.Int("teams", len(orgCfg.Teams)),
 		slog.Int("repos", len(orgCfg.Repos)),

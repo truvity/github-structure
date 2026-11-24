@@ -26,7 +26,12 @@ an estate moves between them.
 App permissions the engine needs: Administration (org+repo, RW),
 Members (RW), Actions/Workflows metadata (R), Organization
 administration (R, only where a ruleset names a bypass App — that is
-how the slug becomes an id), plus whatever your drift checks probe.
+how the slug becomes an id), Self-hosted runners
+(`organization_self_hosted_runners`, RW, only where the org declares
+`runner_groups`), Environments and Variables (repo, RW, only where a row
+declares them), plus whatever your drift checks probe. A permission is
+granted in the App's settings page and approved on each installation;
+no API can grant it, so grant it before the first apply that needs it.
 Keep one App per organization: App display names are globally unique on
 GitHub, so give yours a per-org prefix of your own.
 

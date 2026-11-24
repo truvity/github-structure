@@ -108,7 +108,12 @@ orgs:
             tags: ["v*"]
             reviewer_teams: [team-release]
             prevent_self_review: true
-    runner_groups: {…}
+    runner_groups:                # the org's Actions runner groups (see below)
+      stable:
+        visibility: all           # all | selected | private
+      stable-pilot:
+        visibility: selected
+        repos: [widget]           # in-scope rows; only with visibility: selected
 ```
 
 Sharp edges the schema enforces (each learned, not designed):
@@ -448,6 +453,48 @@ different thing (`settings.actions.variables`, above).
 leaves them unsaid; a row that writes the field keeps what it wrote.
 Applied before validation, so an inherited `secret` on a nested team is
 refused exactly as a written one would be.
+
+## Runner groups — which repositories a group's runners take jobs from
+
+```yaml
+runner_groups:
+  stable:                       # every private repository of the org
+    visibility: all
+  stable-pilot:                 # named repositories only
+    visibility: selected
+    repos: [dms, docs]
+  release:                      # optional: named workflows only
+    visibility: selected
+    repos: [widget]
+    restricted_to_workflows: true
+    selected_workflows:
+      - acme/widget/.github/workflows/release.yaml@refs/heads/master
+```
+
+The engine renders one `github.ActionsRunnerGroup` per entry, so a runner
+group is code and changing one needs no `gh api -X PATCH`.
+
+- **Import, never recreate.** A group that is live (made by hand, or by an
+  earlier run) is imported by its numeric id; anything else is created. A
+  changed setting is an in-place update. Reading the live groups needs the
+  engine App's organization permission **Self-hosted runners
+  (`organization_self_hosted_runners`): read and write**; without it the run
+  stops and says so, and an org that declares no group never asks.
+- **`repos`** are in-scope rows, rendered as the ids of the repositories the
+  same run declares, so a repository created in a run is in its group in
+  that run. `allows_public_repositories` defaults to `false`.
+- **Retained on delete.** Dropping a row stops managing the group and leaves
+  it on GitHub: deleting a group moves its runners to the Default group,
+  where they take jobs from every repository. An organization owner deletes
+  a group on purpose. A group the registry does not name is left alone.
+- **The Default group** is GitHub's own (made with the organization, never
+  deleted or renamed) and is refused as a row, in any case.
+- **Workflows.** `restricted_to_workflows: true` needs `selected_workflows`,
+  and `selected_workflows` needs the restriction (GitHub ignores the list
+  without it). The list renders in the row's order.
+- Refused at load: an unknown visibility; `repos` on a visibility other
+  than `selected`; a repository that is not an in-scope row, or listed
+  twice. Not allowed in a fragment: groups are the organization's.
 
 ## `review` — one field decides how a pull request becomes a merge
 

@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.34.0
+
+### Added
+
+- **An org's `runner_groups:` is rendered as `github.ActionsRunnerGroup`.** The schema existed and was validated, but nothing was declared from it; a runner group was changed by hand with `gh api`. The engine now declares one resource per row: `visibility`, `allows_public_repositories`, `restricted_to_workflows`, `selected_workflows`, and, for `visibility: selected`, the ids of the `repos` (the `RepoId` outputs of the repositories the same run declares, so a repository created in a run is in its group in that run). **Import, never recreate:** a live group is imported by its numeric id, anything else is created, a changed setting is an in-place update. Live groups are read once per org that declares some (`GET /orgs/{org}/actions/runner-groups`, paged), and an unreadable answer stops the run and names the permission. **Retained on delete:** dropping a row leaves the group on GitHub (deleting one moves its runners to the Default group, open to every repository); a group the registry does not name is left alone. The loader now also refuses a row for GitHub's `Default` group (any case), a repository listed twice in one group, and `selected_workflows` without `restricted_to_workflows: true`. **Adoption:** nothing to change unless the org declares `runner_groups`. An org that does needs the engine App's organization permission **Self-hosted runners (`organization_self_hosted_runners`): read and write**, granted in the App's settings and approved on the installation before the first apply; the run stops and names it when it is missing. Write the rows to match the live groups exactly (`gh api orgs/<org>/actions/runner-groups`, and `/runner-groups/<id>/repositories` for a selected group) so the first apply only imports.
+
 ## v0.33.0
 
 ### Added
