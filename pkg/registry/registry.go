@@ -668,6 +668,26 @@ type (
 		// BlockForcePush adds the non_fast_forward rule: the branch
 		// cannot be force-pushed.
 		BlockForcePush bool `yaml:"block_force_push,omitempty"`
+		// RestrictUpdates adds the update rule: only the ruleset's bypass
+		// actors may update the matching branch, so only they can merge a
+		// pull request into it or push to it. Everyone else may still push
+		// other branches and open pull requests against it, and approve
+		// them, but not merge them. The shape for "engineers propose,
+		// devops and SRE merge" on a company's nexus or gitops.
+		//
+		// The bypass modes matter here: a team bypasses in `pull_request`
+		// mode (BypassTeams), so its members merge through a pull request
+		// and still cannot push the branch directly; an App bypasses in
+		// `always` mode (BypassApps), so a promotion App such as Kargo's
+		// write-back keeps its direct commits; organization admins bypass
+		// `always`. A row with restrict_updates therefore needs a bypass:
+		// no_bypass would freeze the branch for everybody.
+		RestrictUpdates bool `yaml:"restrict_updates,omitempty"`
+		// UpdateAllowsFetchAndMerge sets the update rule's
+		// update_allows_fetch_and_merge: a fork's "Sync fork" (fetch and
+		// merge from upstream) may still update the branch. It only means
+		// something with RestrictUpdates, and matters only for forks.
+		UpdateAllowsFetchAndMerge bool `yaml:"update_allows_fetch_and_merge,omitempty"`
 		// MergeQueue, when present, adds the "require merge queue" rule:
 		// pull requests reach the branch only through GitHub's merge
 		// queue, which builds each entry on top of the ones ahead of it
@@ -2059,7 +2079,7 @@ func validateBranchRulesets(login, name string, org *Org, repo *Repo) error {
 		case !rs.enforcesSomething():
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: required_approvals must be positive,"+
 				" required_checks non-empty, or a rule (require_pull_request, block_deletion,"+
-				" block_force_push, merge_queue) set — a ruleset enforcing nothing is noise", login, name, rs.Name)
+				" block_force_push, restrict_updates, merge_queue) set — a ruleset enforcing nothing is noise", login, name, rs.Name)
 		case rs.NoBypass && rs.hasBypass():
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: no_bypass contradicts the bypass_apps,"+
 				" bypass_org_admins or bypass_teams it also names — keep one", login, name, rs.Name)
@@ -2074,6 +2094,13 @@ func validateBranchRulesets(login, name string, org *Org, repo *Repo) error {
 		case rs.RequireCodeOwnerReview && !rs.requiresPullRequest():
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: require_code_owner_review is a setting of the"+
 				" pull_request rule — add required_approvals or require_pull_request: true", login, name, rs.Name)
+		case rs.RestrictUpdates && rs.NoBypass:
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: restrict_updates with no_bypass freezes the"+
+				" branch for everybody — name who may merge (bypass_teams, bypass_apps or bypass_org_admins)",
+				login, name, rs.Name)
+		case rs.UpdateAllowsFetchAndMerge && !rs.RestrictUpdates:
+			return fmt.Errorf("org %q repo %q: branch ruleset %q: update_allows_fetch_and_merge is a setting of"+
+				" the update rule — add restrict_updates: true", login, name, rs.Name)
 		case rs.StrictChecks && len(rs.RequiredChecks) == 0:
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: strict_checks needs required_checks —"+
 				" there is no check to be strict about", login, name, rs.Name)
@@ -2132,7 +2159,7 @@ func (rs *BranchRuleset) hasBypass() bool {
 // enforcesSomething reports whether the ruleset renders at least one rule.
 func (rs *BranchRuleset) enforcesSomething() bool {
 	return rs.requiresPullRequest() || len(rs.RequiredChecks) > 0 ||
-		rs.BlockDeletion || rs.BlockForcePush || rs.MergeQueue != nil
+		rs.BlockDeletion || rs.BlockForcePush || rs.RestrictUpdates || rs.MergeQueue != nil
 }
 
 // BypassAppIDs resolves ruleset bypass App names to the GitHub App

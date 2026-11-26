@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.35.0
+
+### Added
+
+- **A branch ruleset takes `restrict_updates:` (and `update_allows_fetch_and_merge:`).** `restrict_updates: true` renders GitHub's `update` rule on the branch: only the ruleset's bypass actors may update it, so only they can merge a pull request into it or push to it, while everyone else may still push other branches and open and approve pull requests. With the bypass modes the engine already renders, a team in `bypass_teams` merges through a pull request (`pull_request` mode) and still cannot push directly, an App in `bypass_apps` keeps its direct commits (`always`, for a promotion App such as Kargo's write-back) and `bypass_org_admins` bypass `always`. It is the shape for "engineers propose, devops and SRE merge". `update_allows_fetch_and_merge: true` sets the update rule's parameter of that name. The loader refuses `restrict_updates` beside `no_bypass` (nobody could update the branch) and `update_allows_fetch_and_merge` without `restrict_updates`; a ruleset with only `restrict_updates` and a bypass counts as enforcing something. **Adoption:** nothing to change; a row that sets neither key renders the same inputs and plans no diff.
+
 ## v0.34.0
 
 ### Added

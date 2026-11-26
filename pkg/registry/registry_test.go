@@ -1194,3 +1194,54 @@ func TestHomepageValidation(t *testing.T) {
 	_, err := load(t, body)
 	require.NoError(t, err, "empty is accepted")
 }
+
+// restrict_updates is a rule on its own, so a ruleset with only it and a
+// bypass loads, and its fields read back.
+func TestBranchRulesetAcceptsRestrictUpdates(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: merge-by-ops
+            pattern: ~DEFAULT_BRANCH
+            restrict_updates: true
+            update_allows_fetch_and_merge: true
+            bypass_org_admins: true
+`, 1)
+
+	c, err := load(t, body)
+	require.NoError(t, err)
+
+	rs := c.Orgs["acme"].Repos["widget"].BranchRulesets[0]
+	assert.True(t, rs.RestrictUpdates)
+	assert.True(t, rs.UpdateAllowsFetchAndMerge)
+}
+
+// restrict_updates with no_bypass would let nobody update the branch.
+func TestBranchRulesetRejectsRestrictUpdatesWithNoBypass(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: frozen
+            pattern: refs/heads/release
+            restrict_updates: true
+            no_bypass: true
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "freezes the branch for everybody")
+}
+
+// update_allows_fetch_and_merge is a setting of the update rule.
+func TestBranchRulesetRejectsFetchAndMergeWithoutRestrictUpdates(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: odd
+            pattern: ~DEFAULT_BRANCH
+            required_approvals: 1
+            update_allows_fetch_and_merge: true
+            bypass_org_admins: true
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "update_allows_fetch_and_merge is a setting of the update rule")
+}
