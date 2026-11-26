@@ -635,6 +635,19 @@ interchangeable (each learned on 2026-08-26):
   organization admins names an App bypass and no `bypass_org_admins`.
   Classic protection's `protection.require_code_owner_reviews` is a
   different key on the other mechanism, and `review` zeroes it.
+  `restrict_updates: true` adds the `update` rule: only the ruleset's
+  bypass actors may update the branch, so only they can merge into it or
+  push to it. Everyone else can still push other branches, open pull
+  requests against it and approve them, but not merge them. It is the
+  shape for "engineers propose, devops and SRE merge" on a company's
+  nexus or gitops. The bypass modes make it work: `bypass_teams` bypass in
+  `pull_request` mode, so a team's members merge through a pull request
+  and still cannot push the branch directly; `bypass_apps` bypass
+  `always`, so a promotion App (Kargo's write-back) keeps its direct
+  commits; `bypass_org_admins` bypass `always`. It needs a bypass, so it is
+  refused beside `no_bypass`. `update_allows_fetch_and_merge: true` sets
+  the rule's parameter of that name (a fork's "Sync fork" may still update
+  the branch) and is refused without `restrict_updates`.
 - **`enforce_admins: false`** is the blunt escape hatch: admins ignore
   the whole classic rule set. Prefer the two above.
 

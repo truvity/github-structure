@@ -1476,6 +1476,17 @@ func deployBranchRulesets(
 			rules.NonFastForward = pulumi.BoolPtr(true)
 		}
 
+		// The update rule: only the bypass actors may update the branch,
+		// so only they merge (BranchRuleset.RestrictUpdates). Set only when
+		// asked for, like the rules above.
+		if rs.RestrictUpdates {
+			rules.Update = pulumi.BoolPtr(true)
+
+			if rs.UpdateAllowsFetchAndMerge {
+				rules.UpdateAllowsFetchAndMerge = pulumi.BoolPtr(true)
+			}
+		}
+
 		// The merge queue rule. Every field is written, defaults filled
 		// in here, so the ruleset matches what the API reads back and
 		// never diffs forever.

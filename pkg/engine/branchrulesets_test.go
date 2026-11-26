@@ -316,3 +316,90 @@ func TestDeployBranchRulesetsCodeOwnerGateWithTeamBypassOnly(t *testing.T) {
 	assert.True(t, pr["requireCodeOwnerReview"].BoolValue())
 	assert.True(t, pr["dismissStaleReviewsOnPush"].BoolValue())
 }
+
+// restrict_updates renders the update rule, with the bypass actors that
+// make "engineers propose, devops and SRE merge" work: the team merges
+// through a pull request (pull_request mode), the promotion App keeps its
+// direct commits (always) and organization admins bypass (always).
+// update_allows_fetch_and_merge rides along only when asked for.
+func TestDeployBranchRulesetsRestrictUpdates(t *testing.T) {
+	mocks := &teamIDMocks{seen: map[string]resource.PropertyMap{}}
+
+	err := pulumi.RunErr(func(ctx *pulumi.Context) error {
+		provider, err := github.NewProvider(ctx, "gh", &github.ProviderArgs{})
+		if err != nil {
+			return err
+		}
+
+		sre, err := github.NewTeam(ctx, "team-sre", &github.TeamArgs{Name: pulumi.String("sre")}, pulumi.Provider(provider))
+		if err != nil {
+			return err
+		}
+
+		return deployBranchRulesets(ctx, "gitops",
+			registry.InstalledApps{"acme-kargo-writeback": 77},
+			[]*registry.BranchRuleset{{
+				Name:                      "merge-by-ops",
+				Pattern:                   "~DEFAULT_BRANCH",
+				RestrictUpdates:           true,
+				UpdateAllowsFetchAndMerge: true,
+				BypassApps:                []string{"acme-kargo-writeback"},
+				BypassOrgAdmins:           true,
+				BypassTeams:               []string{"sre"},
+			}},
+			map[string]*github.Team{"sre": sre},
+			provider)
+	}, pulumi.WithMocks("proj", "stack", mocks))
+	require.NoError(t, err)
+
+	in, ok := mocks.seen["ruleset-gitops-merge-by-ops"]
+	require.True(t, ok, "the ruleset is declared; got %v", mocks.seen)
+
+	rules := in["rules"].ObjectValue()
+	assert.True(t, rules["update"].BoolValue())
+	assert.True(t, rules["updateAllowsFetchAndMerge"].BoolValue())
+
+	_, pr := rules["pullRequest"]
+	assert.False(t, pr, "restrict_updates alone asks for no pull_request rule")
+
+	modes := map[string]string{}
+	for _, v := range in["bypassActors"].ArrayValue() {
+		a := v.ObjectValue()
+		modes[a["actorType"].StringValue()] = a["bypassMode"].StringValue()
+	}
+
+	assert.Equal(t, map[string]string{
+		"OrganizationAdmin": "always",
+		"Integration":       "always",
+		"Team":              "pull_request",
+	}, modes)
+}
+
+// A row that does not ask for restrict_updates renders no update rule,
+// so every deployed ruleset plans no diff.
+func TestDeployBranchRulesetsRestrictUpdatesIsOptIn(t *testing.T) {
+	mocks := &captureMocks{seen: map[string]resource.PropertyMap{}}
+
+	err := pulumi.RunErr(func(ctx *pulumi.Context) error {
+		provider, err := github.NewProvider(ctx, "gh", &github.ProviderArgs{})
+		if err != nil {
+			return err
+		}
+
+		return deployBranchRulesets(ctx, "widget", registry.InstalledApps{"acme-releases": 77},
+			[]*registry.BranchRuleset{{
+				Name:              "approval",
+				Pattern:           "~DEFAULT_BRANCH",
+				RequiredApprovals: 1,
+				BypassApps:        []string{"acme-releases"},
+			}},
+			nil, provider)
+	}, pulumi.WithMocks("proj", "stack", mocks))
+	require.NoError(t, err)
+
+	rules := mocks.seen["ruleset-widget-approval"]["rules"].ObjectValue()
+	for _, key := range []resource.PropertyKey{"update", "updateAllowsFetchAndMerge"} {
+		_, present := rules[key]
+		assert.False(t, present, "%s must not be rendered unasked", key)
+	}
+}
