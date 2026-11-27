@@ -99,7 +99,8 @@ orgs:
              no_bypass: true}      # optional: no bypass actor at all (instead of bypass_teams)
         workflow_only_tags:       # tags only the repo's own release
           - deploy/pulumi/v*      # workflow may write (see below)
-        branch_rulesets: [...]
+        branch_rulesets: [...]     # e.g. {name: signed-commits, pattern: ~DEFAULT_BRANCH,
+                                   #  no_bypass: true, required_signatures: true}
         variables:                # the repo's own Actions variables:
           RELEASE_ROLE_ARN: arn:...:role/<name>       # NAME: plain value (see below)
         environments:             # deployment environments (see below)
@@ -635,6 +636,21 @@ interchangeable (each learned on 2026-08-26):
   organization admins names an App bypass and no `bypass_org_admins`.
   Classic protection's `protection.require_code_owner_reviews` is a
   different key on the other mechanism, and `review` zeroes it.
+  `required_signatures: true` (the `required_signatures` rule) admits
+  only commits whose signature GitHub verifies, and it counts as a rule
+  on its own, so a ruleset may carry nothing else. Classic protection's
+  `protection.require_signatures` says the same, but an organization
+  admin skips it whenever `enforce_admins` is off; a ruleset binds
+  everyone its bypass list leaves out, so with `no_bypass: true` a
+  repository whose history is its audit log requires a signature of its
+  admins too, while the classic rule's admin bypass of the checks stays
+  as it was. GitHub signs the merge and squash commits it makes on a
+  pull request's merge; it cannot sign a rebase merge, so a repository
+  that requires signatures and allows only rebase takes no pull request.
+  A squash keeps the merge's signature and drops the signatures of the
+  commits it squashes: where those signatures are the record, allow
+  `merge` only. `drift` compares the rule both ways on every declared
+  branch ruleset.
 - **`enforce_admins: false`** is the blunt escape hatch: admins ignore
   the whole classic rule set. Prefer the two above.
 

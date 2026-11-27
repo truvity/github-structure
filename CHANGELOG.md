@@ -4,6 +4,12 @@ Notable changes to this library. The release itself is the git tag (Go
 module versioning); this file is the prose a consumer needs before
 taking a new one.
 
+## v0.35.0
+
+### Added
+
+- **A branch ruleset takes `required_signatures: true`, rendered as the ruleset's `required_signatures` rule.** Every commit that reaches a matching branch must carry a signature GitHub verifies. Classic protection's `protection.require_signatures` already said the same, but an organization admin skips the classic rule whenever `enforce_admins` is off; a ruleset binds everyone its bypass list leaves out, so `no_bypass: true` with `required_signatures: true` requires a signature of admins too, while their bypass of the classic rule's checks stays as it was. The rule counts on its own, so a ruleset may carry nothing else, and the loader's refusal of a ruleset that enforces nothing names it. It is rendered only when set: every existing ruleset renders the same inputs and plans no diff. `drift` compares the rule on every declared branch ruleset, both ways (a rule switched off by hand, and one switched on by hand that the next deploy removes); where GitHub leaves the rules out of its answer, the line is "not visible" only for a ruleset that declares the rule. **Adoption:** nothing to change unless a ruleset declares the key. GitHub cannot sign a rebase merge, so a repository that requires signatures needs `allow_merge_commit` or `allow_squash_merge`; a squash drops the signatures of the commits it squashes.
+
 ## v0.34.0
 
 ### Added

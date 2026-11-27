@@ -161,6 +161,43 @@ func TestDeployBranchRulesetsPlainRulesNoBypass(t *testing.T) {
 	assert.Equal(t, "checks", checks["requiredChecks"].ArrayValue()[0].ObjectValue()["context"].StringValue())
 }
 
+// required_signatures renders the ruleset's required_signatures rule and
+// nothing else it was not asked for: no pull_request rule, so direct
+// pushes of signed commits stay possible.
+func TestDeployBranchRulesetsRequiredSignatures(t *testing.T) {
+	mocks := &captureMocks{seen: map[string]resource.PropertyMap{}}
+
+	err := pulumi.RunErr(func(ctx *pulumi.Context) error {
+		provider, err := github.NewProvider(ctx, "gh", &github.ProviderArgs{})
+		if err != nil {
+			return err
+		}
+
+		return deployBranchRulesets(ctx, "widget", nil,
+			[]*registry.BranchRuleset{{
+				Name:               "signed-commits",
+				Pattern:            "~DEFAULT_BRANCH",
+				NoBypass:           true,
+				RequiredSignatures: true,
+			}},
+			nil, provider)
+	}, pulumi.WithMocks("proj", "stack", mocks))
+	require.NoError(t, err)
+
+	in, ok := mocks.seen["ruleset-widget-signed-commits"]
+	require.True(t, ok, "the ruleset is declared, keyed on repo + name; got %v", mocks.seen)
+
+	assert.Empty(t, in["bypassActors"].ArrayValue(), "no_bypass renders no actor at all")
+
+	rules := in["rules"].ObjectValue()
+	assert.True(t, rules["requiredSignatures"].BoolValue())
+
+	for _, key := range []resource.PropertyKey{"deletion", "nonFastForward", "pullRequest", "requiredStatusChecks"} {
+		_, present := rules[key]
+		assert.False(t, present, "%s must not be rendered unasked", key)
+	}
+}
+
 // A row that sets none of the plain rules renders none of them: no
 // deletion, no non_fast_forward, no strict flag, no pull_request rule at
 // zero approvals. The rows already deployed plan no diff.
@@ -185,7 +222,7 @@ func TestDeployBranchRulesetsPlainRulesAreOptIn(t *testing.T) {
 	require.NoError(t, err)
 
 	rules := mocks.seen["ruleset-widget-master-check"]["rules"].ObjectValue()
-	for _, key := range []resource.PropertyKey{"deletion", "nonFastForward", "pullRequest"} {
+	for _, key := range []resource.PropertyKey{"deletion", "nonFastForward", "pullRequest", "requiredSignatures"} {
 		_, present := rules[key]
 		assert.False(t, present, "%s must not be rendered unasked", key)
 	}

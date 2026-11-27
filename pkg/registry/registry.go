@@ -668,6 +668,17 @@ type (
 		// BlockForcePush adds the non_fast_forward rule: the branch
 		// cannot be force-pushed.
 		BlockForcePush bool `yaml:"block_force_push,omitempty"`
+		// RequiredSignatures adds the required_signatures rule: every
+		// commit that reaches the branch carries a signature GitHub
+		// verifies. Classic protection's require_signatures does the same
+		// but yields to an organization admin whenever enforce_admins is
+		// off; a ruleset binds whoever its bypass list leaves out, so a
+		// repository whose history is its audit log can require a
+		// signature of admins too (no_bypass) without taking their merge
+		// bypass of the classic rule away. GitHub signs the merge and
+		// squash commits it makes itself; it cannot sign a rebase merge,
+		// so a rebase-only repository with this rule takes no pull request.
+		RequiredSignatures bool `yaml:"required_signatures,omitempty"`
 		// MergeQueue, when present, adds the "require merge queue" rule:
 		// pull requests reach the branch only through GitHub's merge
 		// queue, which builds each entry on top of the ones ahead of it
@@ -2059,7 +2070,7 @@ func validateBranchRulesets(login, name string, org *Org, repo *Repo) error {
 		case !rs.enforcesSomething():
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: required_approvals must be positive,"+
 				" required_checks non-empty, or a rule (require_pull_request, block_deletion,"+
-				" block_force_push, merge_queue) set — a ruleset enforcing nothing is noise", login, name, rs.Name)
+				" block_force_push, required_signatures, merge_queue) set — a ruleset enforcing nothing is noise", login, name, rs.Name)
 		case rs.NoBypass && rs.hasBypass():
 			return fmt.Errorf("org %q repo %q: branch ruleset %q: no_bypass contradicts the bypass_apps,"+
 				" bypass_org_admins or bypass_teams it also names — keep one", login, name, rs.Name)
@@ -2132,7 +2143,7 @@ func (rs *BranchRuleset) hasBypass() bool {
 // enforcesSomething reports whether the ruleset renders at least one rule.
 func (rs *BranchRuleset) enforcesSomething() bool {
 	return rs.requiresPullRequest() || len(rs.RequiredChecks) > 0 ||
-		rs.BlockDeletion || rs.BlockForcePush || rs.MergeQueue != nil
+		rs.BlockDeletion || rs.BlockForcePush || rs.RequiredSignatures || rs.MergeQueue != nil
 }
 
 // BypassAppIDs resolves ruleset bypass App names to the GitHub App

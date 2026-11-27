@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	registry "github.com/truvity/github-structure/pkg/registry"
 )
 
@@ -138,4 +141,41 @@ func TestCompareLiveBypassTellsHiddenFromEmpty(t *testing.T) {
 	if len(got) != 1 || got[0].NotVisible {
 		t.Fatalf("empty: %+v, want one drift for the missing actor", got)
 	}
+}
+
+func TestCompareLiveSignatures(t *testing.T) {
+	const subject = "repo widget ruleset signed-commits"
+
+	t.Run("a declared rule that is live is clean", func(t *testing.T) {
+		assert.Empty(t, compareLiveSignatures(subject, true, detailWithRules("required_signatures", "deletion")))
+	})
+
+	t.Run("no rule declared and none live is clean", func(t *testing.T) {
+		assert.Empty(t, compareLiveSignatures(subject, false, detailWithRules("pull_request")))
+	})
+
+	t.Run("a rule switched off by hand is reported", func(t *testing.T) {
+		d := compareLiveSignatures(subject, true, detailWithRules("deletion"))
+		require.Len(t, d, 1)
+		assert.Equal(t, "required signatures", d[0].Field)
+		assert.Equal(t, "true", d[0].Want)
+		assert.Equal(t, "false", d[0].Got)
+	})
+
+	t.Run("a rule switched on by hand is reported", func(t *testing.T) {
+		d := compareLiveSignatures(subject, false, detailWithRules("required_signatures"))
+		require.Len(t, d, 1)
+		assert.Equal(t, "false", d[0].Want)
+		assert.Equal(t, "true", d[0].Got)
+	})
+
+	t.Run("rules the token cannot read are not visible where the rule is declared", func(t *testing.T) {
+		d := compareLiveSignatures(subject, true, liveRulesetDetail{})
+		require.Len(t, d, 1)
+		assert.True(t, d[0].NotVisible)
+	})
+
+	t.Run("rules the token cannot read add nothing where the rule is not declared", func(t *testing.T) {
+		assert.Empty(t, compareLiveSignatures(subject, false, liveRulesetDetail{}))
+	})
 }

@@ -1466,14 +1466,19 @@ func deployBranchRulesets(
 			rules.RequiredStatusChecks = statusChecks
 		}
 
-		// The two plain rules. Set only when asked for, so a ruleset that
-		// does not declare them renders the same inputs it always did.
+		// The plain rules. Set only when asked for, so a ruleset that does
+		// not declare them renders the same inputs it always did.
 		if rs.BlockDeletion {
 			rules.Deletion = pulumi.BoolPtr(true)
 		}
 
 		if rs.BlockForcePush {
 			rules.NonFastForward = pulumi.BoolPtr(true)
+		}
+
+		// Required signatures, the same way: only when asked for.
+		if rs.RequiredSignatures {
+			rules.RequiredSignatures = pulumi.BoolPtr(true)
 		}
 
 		// The merge queue rule. Every field is written, defaults filled
