@@ -637,6 +637,37 @@ func TestBranchRulesetPlainRuleAloneIsEnforcement(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// required_signatures alone is a rule, so the ruleset is not "enforcing
+// nothing"; with no_bypass it binds organization admins too.
+func TestBranchRulesetRequiredSignaturesAloneIsEnforcement(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: signed-commits
+            pattern: ~DEFAULT_BRANCH
+            no_bypass: true
+            required_signatures: true
+`, 1)
+
+	c, err := load(t, body)
+	require.NoError(t, err)
+	assert.True(t, c.Orgs["acme"].Repos["widget"].BranchRulesets[0].RequiredSignatures)
+}
+
+// Without it, and with nothing else, the ruleset still enforces nothing,
+// and the refusal names the new rule among the ones that would count.
+func TestBranchRulesetEnforcingNothingNamesRequiredSignatures(t *testing.T) {
+	body := strings.Replace(minimal, "        preset: public\n", `        preset: public
+        branch_rulesets:
+          - name: signed-commits
+            pattern: ~DEFAULT_BRANCH
+            no_bypass: true
+`, 1)
+
+	_, err := load(t, body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "required_signatures")
+}
+
 // Merge methods are a setting of the pull_request rule and take only the
 // three spellings GitHub knows.
 func TestBranchRulesetMergeMethodsAreChecked(t *testing.T) {

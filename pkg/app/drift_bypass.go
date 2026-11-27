@@ -172,6 +172,8 @@ func checkRulesetActors(
 	// The acts each declared tag ruleset restricts (creation, update,
 	// deletion), so a rule narrowed or widened by hand is reported.
 	wantTagRules := map[string][]string{}
+	// Whether each declared branch ruleset requires signed commits.
+	wantSignatures := map[string]bool{}
 
 	for _, rs := range repo.TagRulesets {
 		// The registry names its bypass Apps; GitHub reports database
@@ -216,6 +218,7 @@ func checkRulesetActors(
 		}
 
 		wantActors[rs.Name] = declaredBranchActors(ctx, org, rs, appIDs, teamIDs)
+		wantSignatures[rs.Name] = rs.RequiredSignatures
 
 		// A code-owner gate is compared even at zero approvals
 		// (require_pull_request): the owner approval is what it enforces.
@@ -265,6 +268,10 @@ func checkRulesetActors(
 
 		if wantRules, isTag := wantTagRules[rs.Name]; isTag {
 			drifts = append(drifts, compareLiveTagRules("repo "+name+" ruleset "+rs.Name, wantRules, detail)...)
+		}
+
+		if want, isBranch := wantSignatures[rs.Name]; isBranch {
+			drifts = append(drifts, compareLiveSignatures("repo "+name+" ruleset "+rs.Name, want, detail)...)
 		}
 
 		if n, stated := wantApprovals[rs.Name]; stated {
@@ -454,6 +461,42 @@ func compareLiveTagRules(subject string, want []string, detail liveRulesetDetail
 	}
 
 	return compareBypassSets(subject, "rules", want, got)
+}
+
+// compareLiveSignatures compares whether a branch ruleset requires signed
+// commits, in both directions: a rule switched off by hand leaves the
+// actors and the approvals as they were and is otherwise invisible, and
+// one switched on by hand is what the next deploy removes. Rules left out
+// of GitHub's answer are not visible to the token; that is reported only
+// where the ruleset declares the rule, so a narrow token adds no line for
+// every ruleset that never asked for it.
+func compareLiveSignatures(subject string, want bool, detail liveRulesetDetail) []Drift {
+	if detail.Rules == nil {
+		if want {
+			return []Drift{{Subject: subject, Field: "required signatures", NotVisible: true}}
+		}
+
+		return nil
+	}
+
+	got := false
+
+	for _, rule := range detail.Rules {
+		if rule.Type == "required_signatures" {
+			got = true
+		}
+	}
+
+	if got == want {
+		return nil
+	}
+
+	return []Drift{{
+		Subject: subject,
+		Field:   "required signatures",
+		Want:    strconv.FormatBool(want),
+		Got:     strconv.FormatBool(got),
+	}}
 }
 
 // compareBypassSets reports the symmetric difference of two actor sets
